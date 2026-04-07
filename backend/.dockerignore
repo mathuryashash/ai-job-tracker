@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+.env.local
+uploads/*
+!uploads/.gitkeep
+*.log
+.git
+.gitignore
+README.md
+.vscode
+coverage
+*.md
+*.tmp
+*.tsbuildinfo
