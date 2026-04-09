@@ -110,14 +110,14 @@ export default function JobTracker() {
         </div>
       ) : (
         <DragDropContext onDragEnd={handleDragEnd}>
-          <div className="grid grid-cols-5 gap-4 overflow-x-auto">
+          <div className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory md:grid md:grid-cols-5 md:overflow-visible md:pb-0">
             {columns.map((column) => (
               <Droppable key={column.id} droppableId={column.id}>
                 {(provided) => (
                   <div
                     ref={provided.innerRef}
                     {...provided.droppableProps}
-                    className={`${column.color} rounded-lg p-4 min-h-[500px]`}
+                    className={`${column.color} rounded-lg p-4 min-h-[500px] w-[280px] flex-shrink-0 snap-start md:w-auto md:flex-shrink`}
                   >
                     <h2 className="font-semibold text-gray-900 mb-4">
                       {column.title}
@@ -152,7 +152,8 @@ export default function JobTracker() {
                                 </div>
                                 <button
                                   onClick={() => handleDelete(app.id)}
-                                  className="text-gray-400 hover:text-red-500"
+                                  className="text-gray-400 hover:text-red-500 w-7 h-7 rounded-full hover:bg-red-50"
+                                  aria-label={`Delete ${app.positionTitle} at ${app.companyName}`}
                                 >
                                   ×
                                 </button>

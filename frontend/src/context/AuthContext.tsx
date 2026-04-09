@@ -24,15 +24,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Try to restore session from sessionStorage (more secure than localStorage)
-    const savedToken = sessionStorage.getItem('authToken');
-    if (savedToken) {
+    const clearSession = () => {
+      sessionStorage.removeItem('authToken');
+      setToken(null);
+      setUser(null);
+      delete axios.defaults.headers.common['Authorization'];
+    };
+
+    const restoreSession = async () => {
+      const savedToken = sessionStorage.getItem('authToken');
+      if (!savedToken) {
+        setLoading(false);
+        return;
+      }
+
       setToken(savedToken);
-      // Set the default authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
-      // TODO: Validate token is still valid by calling /api/auth/me
-    }
-    setLoading(false);
+
+      try {
+        const response = await axios.get('/api/auth/me');
+        if (response.data?.success && response.data?.data) {
+          setUser(response.data.data as User);
+          setLoading(false);
+          return;
+        }
+
+        clearSession();
+      } catch (_error) {
+        clearSession();
+      }
+
+      setLoading(false);
+    };
+
+    restoreSession();
   }, []);
 
   const login = async (email: string, name: string, picture?: string) => {

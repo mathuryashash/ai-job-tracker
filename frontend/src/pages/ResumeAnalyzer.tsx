@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { useAuth } from '../context/AuthContext';
 import RadarChart from './RadarChart';
 
 interface Analysis {
@@ -13,8 +12,8 @@ interface Analysis {
 }
 
 export default function ResumeAnalyzer() {
-  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [resumeId, setResumeId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -22,7 +21,6 @@ export default function ResumeAnalyzer() {
   const [analyzing, setAnalyzing] = useState(false);
   const [currentAnalysis, setCurrentAnalysis] = useState<Analysis | null>(null);
   const [history, setHistory] = useState<Analysis[]>([]);
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -68,7 +66,10 @@ export default function ResumeAnalyzer() {
         if (latestAnalysis.status === 'completed') {
           setCurrentAnalysis(latestAnalysis);
           setHistory(response.data.data);
-          if (pollInterval) clearInterval(pollInterval);
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
           return true;
         }
       }
@@ -94,12 +95,18 @@ export default function ResumeAnalyzer() {
 
       // Poll for results (check every 2 seconds, max 60 seconds)
       let pollCount = 0;
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
       const interval = setInterval(async () => {
         pollCount++;
         const completed = await pollAnalysisStatus(resumeId);
         
         if (completed || pollCount > 30) {
-          clearInterval(interval);
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
           setAnalyzing(false);
           if (!completed) {
             alert('Analysis is taking longer than expected. Please check back in a moment.');
@@ -107,7 +114,7 @@ export default function ResumeAnalyzer() {
         }
       }, 2000);
 
-      setPollInterval(interval);
+      pollIntervalRef.current = interval;
     } catch (error) {
       console.error('Analysis failed:', error);
       alert('Failed to queue analysis');
@@ -117,9 +124,12 @@ export default function ResumeAnalyzer() {
 
   useEffect(() => {
     return () => {
-      if (pollInterval) clearInterval(pollInterval);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
     };
-  }, [pollInterval]);
+  }, []);
 
   return (
     <div>
@@ -129,9 +139,10 @@ export default function ResumeAnalyzer() {
         <div className="card">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload Resume</h2>
           
-          <div
+          <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-primary-500 transition-colors"
+            className="w-full border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-primary-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
           >
             <input
               ref={fileInputRef}
@@ -152,7 +163,7 @@ export default function ResumeAnalyzer() {
                 <p className="text-sm text-gray-400">Max file size: 5MB</p>
               </div>
             )}
-          </div>
+          </button>
 
           {file && (
             <button
@@ -240,10 +251,11 @@ export default function ResumeAnalyzer() {
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Analysis History</h2>
           <div className="space-y-2">
             {history.map((analysis) => (
-              <div
+              <button
+                type="button"
                 key={analysis.id}
                 onClick={() => setCurrentAnalysis(analysis)}
-                className="p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50"
+                className="w-full p-3 border border-gray-200 rounded-lg text-left cursor-pointer hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
               >
                 <div className="flex justify-between items-center">
                   <span className="font-medium">{analysis.matchPercentage}%</span>
@@ -251,7 +263,7 @@ export default function ResumeAnalyzer() {
                     {new Date(analysis.createdAt).toLocaleDateString()}
                   </span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
