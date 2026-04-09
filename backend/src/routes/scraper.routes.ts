@@ -7,6 +7,54 @@ import { runAutoApply } from '../services/auto-apply.service';
 
 const router = Router();
 
+type ScraperPrismaAccess = {
+  scrapedJob: {
+    findMany: (args: {
+      where: Record<string, unknown>;
+      orderBy: Array<Record<string, 'asc' | 'desc'>>;
+      skip: number;
+      take: number;
+    }) => Promise<unknown[]>;
+    count: (args: { where: Record<string, unknown> }) => Promise<number>;
+  };
+  jobSource: {
+    deleteMany: (args: { where: { userId: string } }) => Promise<unknown>;
+    create: (args: {
+      data: {
+        userId: string;
+        name: string;
+        enabled: boolean;
+        keywords: string[];
+        location: string;
+        remoteOnly: boolean;
+      };
+    }) => Promise<unknown>;
+    findMany: (args: {
+      where: { userId: string };
+      orderBy: { createdAt: 'asc' | 'desc' };
+    }) => Promise<unknown[]>;
+  };
+};
+
+const scraperPrisma = prisma as unknown as ScraperPrismaAccess;
+
+function getStatusCode(error: unknown): number {
+  if (typeof error === 'object' && error !== null && 'statusCode' in error) {
+    const statusCode = (error as { statusCode?: number }).statusCode;
+    if (typeof statusCode === 'number') {
+      return statusCode;
+    }
+  }
+  return 500;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
 // ── Validation Schemas ──
 
 const triggerSchema = z.object({
@@ -19,13 +67,13 @@ const triggerSchema = z.object({
 const preferencesSchema = z.object({
   sources: z.array(
     z.object({
-      name: z.string(),
+      name: z.string().min(1).max(100),
       enabled: z.boolean().default(true),
-      keywords: z.array(z.string()),
-      location: z.string().default('remote'),
+      keywords: z.array(z.string().min(1).max(100)).max(20),
+      location: z.string().max(100).default('remote'),
       remoteOnly: z.boolean().default(true),
     })
-  ),
+  ).max(20),
 });
 
 // ── POST /api/scraper/trigger — Start a manual scrape ──
@@ -64,8 +112,8 @@ router.post('/trigger', async (req: AuthRequest, res: Response) => {
     res.json({
       success: true,
       message: 'Job scraping triggered',
-      totalProcessed: result.length,
-      applicationsCreated: result.filter((r) => r.applicationCreated).length,
+      totalProcessed: result.results.length,
+      applicationsCreated: result.results.filter((r) => r.applicationCreated).length,
       config: {
         keywords: config.keywords,
         location: config.location,
@@ -78,8 +126,9 @@ router.post('/trigger', async (req: AuthRequest, res: Response) => {
       res.status(400).json({ success: false, error: 'Validation error', details: error.errors });
       return;
     }
+    const statusCode = getStatusCode(error);
     console.error('Trigger error:', error);
-    res.status(500).json({ success: false, error: 'Failed to trigger scraping' });
+    res.status(statusCode).json({ success: false, error: getErrorMessage(error, 'Failed to trigger scraping') });
   }
 });
 
@@ -96,8 +145,8 @@ router.post('/stop', async (req: AuthRequest, res: Response) => {
     throw createError('Stop scraping is not implemented yet', 501);
   } catch (error) {
     console.error('Stop scraping error:', error);
-    const statusCode = (error as any)?.statusCode || 500;
-    res.status(statusCode).json({ success: false, error: (error as Error).message || 'Failed to stop scraping' });
+    const statusCode = getStatusCode(error);
+    res.status(statusCode).json({ success: false, error: getErrorMessage(error, 'Failed to stop scraping') });
   }
 });
 
@@ -114,8 +163,8 @@ router.post('/resume', async (req: AuthRequest, res: Response) => {
     throw createError('Resume scraping is not implemented yet', 501);
   } catch (error) {
     console.error('Resume scraping error:', error);
-    const statusCode = (error as any)?.statusCode || 500;
-    res.status(statusCode).json({ success: false, error: (error as Error).message || 'Failed to resume scraping' });
+    const statusCode = getStatusCode(error);
+    res.status(statusCode).json({ success: false, error: getErrorMessage(error, 'Failed to resume scraping') });
   }
 });
 
@@ -136,7 +185,8 @@ router.get('/status', async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Status check error:', error);
-    res.status(500).json({ success: false, error: 'Failed to check status' });
+    const statusCode = getStatusCode(error);
+    res.status(statusCode).json({ success: false, error: getErrorMessage(error, 'Failed to check status') });
   }
 });
 
@@ -154,18 +204,18 @@ router.get('/jobs', async (req: AuthRequest, res: Response) => {
     const status = req.query.status as string;
     const minScore = parseInt(req.query.minScore as string) || 0;
 
-    const where: any = { userId };
+    const where: Record<string, unknown> = { userId };
     if (status) where.status = status;
     if (minScore > 0) where.matchScore = { gte: minScore };
 
     const [jobs, total] = await Promise.all([
-      prisma.scrapedJob.findMany({
+      scraperPrisma.scrapedJob.findMany({
         where,
         orderBy: [{ matchScore: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.scrapedJob.count({ where }),
+      scraperPrisma.scrapedJob.count({ where }),
     ]);
 
     res.json({
@@ -180,7 +230,8 @@ router.get('/jobs', async (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('List jobs error:', error);
-    res.status(500).json({ success: false, error: 'Failed to list scraped jobs' });
+    const statusCode = getStatusCode(error);
+    res.status(statusCode).json({ success: false, error: getErrorMessage(error, 'Failed to list scraped jobs') });
   }
 });
 
@@ -201,10 +252,12 @@ router.post('/preferences', async (req: AuthRequest, res: Response) => {
     }
 
     const created = await prisma.$transaction(async (tx) => {
-      await tx.jobSource.deleteMany({ where: { userId } });
+      const txWithSources = tx as unknown as Pick<ScraperPrismaAccess, 'jobSource'>;
+
+      await txWithSources.jobSource.deleteMany({ where: { userId } });
       return Promise.all(
         sources.map((source) =>
-          tx.jobSource.create({
+          txWithSources.jobSource.create({
             data: {
               userId,
               name: source.name,
@@ -229,7 +282,8 @@ router.post('/preferences', async (req: AuthRequest, res: Response) => {
       return;
     }
     console.error('Preferences error:', error);
-    res.status(500).json({ success: false, error: 'Failed to save preferences' });
+    const statusCode = getStatusCode(error);
+    res.status(statusCode).json({ success: false, error: getErrorMessage(error, 'Failed to save preferences') });
   }
 });
 
@@ -242,7 +296,7 @@ router.get('/preferences', async (req: AuthRequest, res: Response) => {
       throw createError('Unauthorized', 401);
     }
 
-    const sources = await prisma.jobSource.findMany({
+    const sources = await scraperPrisma.jobSource.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
@@ -250,7 +304,8 @@ router.get('/preferences', async (req: AuthRequest, res: Response) => {
     res.json({ success: true, data: sources });
   } catch (error) {
     console.error('Get preferences error:', error);
-    res.status(500).json({ success: false, error: 'Failed to get preferences' });
+    const statusCode = getStatusCode(error);
+    res.status(statusCode).json({ success: false, error: getErrorMessage(error, 'Failed to get preferences') });
   }
 });
 

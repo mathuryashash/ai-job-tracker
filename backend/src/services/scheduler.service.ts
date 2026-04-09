@@ -1,4 +1,5 @@
 import { runAutoApply, AutomationConfig } from '../services/auto-apply.service';
+import { Prisma } from '@prisma/client';
 import prisma from '../prisma/index';
 
 export interface ScheduledTask {
@@ -19,6 +20,7 @@ export interface ScheduledTask {
 }
 
 let schedulerInterval: NodeJS.Timeout | null = null;
+let isSchedulerRunning = false;
 
 export async function initScheduler() {
   console.log('Initializing job search scheduler...');
@@ -27,10 +29,18 @@ export async function initScheduler() {
 
   const intervalMs = getSchedulerIntervalMs();
   schedulerInterval = setInterval(async () => {
+    if (isSchedulerRunning) {
+      console.warn('Scheduler tick skipped: previous run still in progress');
+      return;
+    }
+
+    isSchedulerRunning = true;
     try {
       await runScheduledTasks();
     } catch (error) {
       console.error('Scheduler tick error:', error);
+    } finally {
+      isSchedulerRunning = false;
     }
   }, intervalMs);
   
@@ -53,31 +63,63 @@ function getSchedulerIntervalMs(): number {
   return safeMinutes * 60 * 1000;
 }
 
+function getFrequencyMs(frequency: unknown): number {
+  if (frequency === 'hourly') {
+    return 60 * 60 * 1000;
+  }
+  if (frequency === 'weekly') {
+    return 7 * 24 * 60 * 60 * 1000;
+  }
+  return 24 * 60 * 60 * 1000;
+}
+
+function shouldRunAutomation(automation: Record<string, unknown>, now: Date): boolean {
+  const nextRunRaw = automation.nextRun;
+  if (typeof nextRunRaw === 'string' || nextRunRaw instanceof Date) {
+    const nextRun = new Date(nextRunRaw);
+    if (!Number.isNaN(nextRun.getTime())) {
+      return now >= nextRun;
+    }
+  }
+
+  const lastRunRaw = automation.lastRun;
+  if (typeof lastRunRaw === 'string' || lastRunRaw instanceof Date) {
+    const lastRun = new Date(lastRunRaw);
+    if (!Number.isNaN(lastRun.getTime())) {
+      return now.getTime() - lastRun.getTime() >= getFrequencyMs(automation.frequency);
+    }
+  }
+
+  return true;
+}
+
 export async function runScheduledTasks() {
   try {
+    const now = new Date();
     const tasks = await prisma.user.findMany({
       where: {
         preferences: {
           path: ['automation'],
-          not: null,
+          not: Prisma.AnyNull,
         },
       },
     });
 
     for (const user of tasks) {
       const preferences = user.preferences as any;
-      const automation = preferences?.automation;
+      const automation = preferences?.automation as Record<string, unknown> | undefined;
 
       if (!automation?.enabled) continue;
+      if (!shouldRunAutomation(automation, now)) continue;
 
       const config: AutomationConfig = {
         userId: user.id,
-        keywords: automation.keywords,
-        location: automation.location,
-        matchThreshold: automation.matchThreshold || 70,
-        autoTailorResume: automation.autoTailorResume ?? true,
-        autoGenerateCoverLetter: automation.autoGenerateCoverLetter ?? true,
-        useAIKeywords: automation.useAIKeywords ?? true,
+        keywords: typeof automation.keywords === 'string' ? automation.keywords : undefined,
+        location: typeof automation.location === 'string' ? automation.location : undefined,
+        matchThreshold: typeof automation.matchThreshold === 'number' ? automation.matchThreshold : 70,
+        autoTailorResume: typeof automation.autoTailorResume === 'boolean' ? automation.autoTailorResume : true,
+        autoGenerateCoverLetter: typeof automation.autoGenerateCoverLetter === 'boolean' ? automation.autoGenerateCoverLetter : true,
+        useAIKeywords: typeof automation.useAIKeywords === 'boolean' ? automation.useAIKeywords : true,
       };
 
       try {
@@ -92,7 +134,8 @@ export async function runScheduledTasks() {
               ...preferences,
               automation: {
                 ...automation,
-                lastRun: new Date(),
+                lastRun: now,
+                nextRun: new Date(now.getTime() + getFrequencyMs(automation.frequency)),
                 lastResults: results,
                 status: 'completed',
                 extractedKeywords: automationResult.extractedKeywords,

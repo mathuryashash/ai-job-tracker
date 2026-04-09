@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
+import dns from 'dns/promises';
+import net from 'net';
 import { triggerAutomation } from '../services/scheduler.service';
 import { getAutomationStatus } from '../services/auto-apply.service';
 import { searchJobs, getJobDescription } from '../services/job-scraper.service';
@@ -23,16 +25,16 @@ const triggerSchema = z.object({
 const searchSchema = z.object({
   keywords: z.string().optional(),
   location: z.string().optional(),
-  remote: z.boolean().optional(),
-  fullTime: z.boolean().optional(),
+  remote: z.coerce.boolean().optional(),
+  fullTime: z.coerce.boolean().optional(),
 });
 
 const matchSchema = z.object({
-  jobDescription: z.string().min(1),
+  jobDescription: z.string().min(1).max(20000),
 });
 
 const tailorSchema = z.object({
-  jobDescription: z.string().min(1),
+  jobDescription: z.string().min(1).max(20000),
   resumeId: z.string().optional(),
 });
 
@@ -41,42 +43,77 @@ const jobUrlSchema = z.string().url().refine((value) => {
   if (!['http:', 'https:'].includes(parsed.protocol)) {
     return false;
   }
+  return true;
+}, 'Invalid URL');
 
-  const blockedHosts = ['localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1'];
-  if (blockedHosts.includes(parsed.hostname)) {
-    return false;
+function isPrivateIp(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+  if (normalized === '::1' || normalized === '::ffff:127.0.0.1') {
+    return true;
   }
 
-  if (parsed.hostname.startsWith('10.')) {
-    return false;
-  }
-
-  if (parsed.hostname.startsWith('192.168.')) {
-    return false;
-  }
-
-  if (parsed.hostname.startsWith('172.')) {
-    const octets = parsed.hostname.split('.');
-    const second = octets.length > 1 ? parseInt(octets[1], 10) : -1;
-    if (second >= 16 && second <= 31) {
-      return false;
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split('.').map(Number);
+    if (a === 10 || a === 127 || a === 0) {
+      return true;
     }
+    if (a === 169 && b === 254) {
+      return true;
+    }
+    if (a === 192 && b === 168) {
+      return true;
+    }
+    if (a === 172 && b >= 16 && b <= 31) {
+      return true;
+    }
+    return false;
   }
 
-  const lowerHost = parsed.hostname.toLowerCase();
-  if (lowerHost.includes(':')) {
-    if (
-      lowerHost === '::1' ||
-      lowerHost.startsWith('fe80:') ||
-      lowerHost.startsWith('fc') ||
-      lowerHost.startsWith('fd')
-    ) {
-      return false;
+  if (net.isIPv6(ip)) {
+    if (normalized.startsWith('fc') || normalized.startsWith('fd')) {
+      return true;
     }
+    if (normalized.startsWith('fe80:')) {
+      return true;
+    }
+    if (normalized.startsWith('::ffff:10.') || normalized.startsWith('::ffff:192.168.')) {
+      return true;
+    }
+    const mapped172 = normalized.match(/^::ffff:172\.(\d+)\./);
+    if (mapped172) {
+      const second = parseInt(mapped172[1], 10);
+      if (second >= 16 && second <= 31) {
+        return true;
+      }
+    }
+    return false;
   }
 
   return true;
-}, 'Invalid URL');
+}
+
+async function validateOutboundJobUrl(url: string): Promise<boolean> {
+  const parsed = new URL(url);
+  const host = parsed.hostname.toLowerCase();
+
+  if (host === 'localhost' || host.endsWith('.local')) {
+    return false;
+  }
+
+  if (net.isIP(host)) {
+    return !isPrivateIp(host);
+  }
+
+  try {
+    const records = await dns.lookup(host, { all: true, verbatim: true });
+    if (records.length === 0) {
+      return false;
+    }
+    return records.every((record) => !isPrivateIp(record.address));
+  } catch (_error) {
+    return false;
+  }
+}
 
 router.post('/trigger', async (req: Request, res: Response) => {
   try {
@@ -132,6 +169,10 @@ router.post('/trigger', async (req: Request, res: Response) => {
 router.get('/status', async (req: Request, res: Response) => {
   try {
     const userId = getAuthUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
 
     const status = await getAutomationStatus(userId);
 
@@ -210,6 +251,10 @@ router.post('/match', async (req: Request, res: Response) => {
 router.post('/tailor', async (req: Request, res: Response) => {
   try {
     const userId = getAuthUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
 
     const data = tailorSchema.parse(req.body);
 
@@ -270,6 +315,12 @@ router.get('/jobs', async (req: Request, res: Response) => {
     }
 
     const safeUrl = jobUrlSchema.parse(url);
+    const canFetch = await validateOutboundJobUrl(safeUrl);
+    if (!canFetch) {
+      res.status(400).json({ success: false, error: 'Invalid URL' });
+      return;
+    }
+
     const description = await getJobDescription(safeUrl);
 
     res.json({ success: true, data: { description } });

@@ -37,7 +37,7 @@ export function getAuthUserId(req: AuthRequest): string | undefined {
 
 export function generateToken(userId: string, email: string): string {
   const secret = process.env.JWT_SECRET;
-  const expiration = process.env.JWT_EXPIRATION || '24h';
+  const expiration = (process.env.JWT_EXPIRATION || '24h') as jwt.SignOptions['expiresIn'];
 
   if (!secret) {
     throw new Error('JWT_SECRET not configured');
