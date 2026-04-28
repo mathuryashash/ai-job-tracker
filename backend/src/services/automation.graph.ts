@@ -10,6 +10,7 @@ import { matchResumeToJob, meetsThreshold, type MatchResult } from './job-matchi
 import { getJobDescription, searchJobs, type Job, type JobSearchParams, type UserApiKeys } from './job-scraper.service';
 import { tailorResume, type TailoredResume } from './resume-tailoring.service';
 import { tryDecryptApiKeys } from '../utils/crypto';
+import { broadcastToUser } from './websocket';
 
 export interface AutomationGraphState {
   userId: string;
@@ -247,7 +248,16 @@ export async function processJobsNode(
   const errors: string[] = [];
   const resumeText = state.resumeText || '';
 
-  for (const job of state.dedupedJobs) {
+  // Broadcast initial progress
+  broadcastToUser(state.config.userId, 'automation:progress', {
+    status: 'started',
+    completed: 0,
+    total: state.dedupedJobs.length,
+    timestamp: new Date().toISOString(),
+  });
+
+  for (let i = 0; i < state.dedupedJobs.length; i++) {
+    const job = state.dedupedJobs[i];
     try {
       if (job.url) {
         const existingApplication = await deps.findExistingApplication({
@@ -262,6 +272,15 @@ export async function processJobsNode(
             applicationCreated: false,
             applicationId: existingApplication.id,
             error: 'Skipped duplicate job URL (already tracked)',
+          });
+          
+          // Broadcast progress after each job (including skipped)
+          broadcastToUser(state.config.userId, 'automation:progress', {
+            status: 'processing',
+            completed: i + 1,
+            total: state.dedupedJobs.length,
+            currentJob: job.title,
+            timestamp: new Date().toISOString(),
           });
           continue;
         }
@@ -282,6 +301,15 @@ export async function processJobsNode(
         continue;
       }
 
+      // Broadcast progress before matching
+      broadcastToUser(state.config.userId, 'automation:progress', {
+        status: 'matching',
+        completed: i + 1,
+        total: state.dedupedJobs.length,
+        currentJob: job.title,
+        timestamp: new Date().toISOString(),
+      });
+
       const matchResult = await deps.matchResumeToJob(resumeText, jobDescription);
       if (!deps.meetsThreshold(matchResult, state.config.matchThreshold)) {
         await deps.markScrapedJobStatus(state.config.userId, job, 'skipped', matchResult.matchPercentage);
@@ -290,6 +318,17 @@ export async function processJobsNode(
           matchResult,
           applicationCreated: false,
           error: `Match ${matchResult.matchPercentage}% below threshold ${state.config.matchThreshold}%`,
+        });
+        
+        // Broadcast progress after each job
+        broadcastToUser(state.config.userId, 'automation:progress', {
+          status: 'processing',
+          completed: i + 1,
+          total: state.dedupedJobs.length,
+          currentJob: job.title,
+          matchScore: matchResult.matchPercentage,
+          skipped: true,
+          timestamp: new Date().toISOString(),
         });
         continue;
       }
@@ -329,6 +368,16 @@ export async function processJobsNode(
         coverLetterGenerated: Boolean(coverLetter),
       });
 
+      // Broadcast new job application event
+      broadcastToUser(state.config.userId, 'application:status', {
+        applicationId: application.id,
+        jobTitle: job.title,
+        company: job.company,
+        status: 'applied',
+        matchScore: matchResult.matchPercentage,
+        timestamp: new Date().toISOString(),
+      });
+
       results.push({
         job,
         matchResult,
@@ -336,6 +385,17 @@ export async function processJobsNode(
         coverLetter,
         applicationCreated: true,
         applicationId: application.id,
+      });
+
+      // Broadcast progress after each job
+      broadcastToUser(state.config.userId, 'automation:progress', {
+        status: 'processing',
+        completed: i + 1,
+        total: state.dedupedJobs.length,
+        currentJob: job.title,
+        matchScore: matchResult.matchPercentage,
+        applied: true,
+        timestamp: new Date().toISOString(),
       });
     } catch (error) {
       const message = String(error);
@@ -346,8 +406,28 @@ export async function processJobsNode(
         applicationCreated: false,
         error: message,
       });
+
+      // Broadcast error progress
+      broadcastToUser(state.config.userId, 'automation:progress', {
+        status: 'error',
+        completed: i + 1,
+        total: state.dedupedJobs.length,
+        currentJob: job.title,
+        error: message,
+        timestamp: new Date().toISOString(),
+      });
     }
   }
+
+  // Broadcast completion
+  broadcastToUser(state.config.userId, 'automation:progress', {
+    status: 'completed',
+    completed: state.dedupedJobs.length,
+    total: state.dedupedJobs.length,
+    resultsCount: results.filter(r => r.applicationCreated).length,
+    errorsCount: errors.length,
+    timestamp: new Date().toISOString(),
+  });
 
   return { results, errors };
 }
