@@ -10,6 +10,20 @@ interface Stats {
   rejected: number;
 }
 
+interface JobRecommendation {
+  job: {
+    id: string;
+    title: string;
+    company: string;
+    location: string;
+    url: string;
+    salary: string | null;
+    source: string;
+  };
+  score: number;
+  reasons: string[];
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats>({
     totalApplications: 0,
@@ -18,6 +32,8 @@ export default function Dashboard() {
     offers: 0,
     rejected: 0,
   });
+  const [recommendations, setRecommendations] = useState<JobRecommendation[]>([]);
+  const [loadingRecommendations, setLoadingRecommendations] = useState(false);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -42,7 +58,22 @@ export default function Dashboard() {
       }
     };
 
+    const fetchRecommendations = async () => {
+      try {
+        setLoadingRecommendations(true);
+        const response = await axios.get('/api/automation/recommendations?limit=10');
+        if (response.data.success) {
+          setRecommendations(response.data.data.recommendations || []);
+        }
+      } catch (error) {
+        console.error('Failed to fetch recommendations:', error);
+      } finally {
+        setLoadingRecommendations(false);
+      }
+    };
+
     fetchStats();
+    fetchRecommendations();
   }, []);
 
   const statCards = [
@@ -111,6 +142,80 @@ export default function Dashboard() {
           </ol>
         </div>
       </div>
+
+      {/* Job Recommendations Section */}
+      {recommendations.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Recommended Jobs</h2>
+            <span className="text-sm text-gray-500">Based on your resume & preferences</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {recommendations.slice(0, 6).map((rec) => (
+              <a
+                key={rec.job.id}
+                href={rec.job.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="card hover:border-primary-500 transition-colors"
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="font-medium text-gray-900 text-sm line-clamp-2">
+                    {rec.job.title}
+                  </h3>
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                    rec.score >= 70 ? 'bg-green-100 text-green-700' :
+                    rec.score >= 50 ? 'bg-yellow-100 text-yellow-700' :
+                    'bg-gray-100 text-gray-700'
+                  }`}>
+                    {rec.score}%
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mb-2">{rec.job.company}</p>
+                <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                  <span>📍 {rec.job.location}</span>
+                  {rec.job.salary && <span>💰 {rec.job.salary}</span>}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">{rec.job.source}</span>
+                  <div className="flex gap-1">
+                    {rec.reasons.slice(0, 2).map((reason, idx) => (
+                      <span key={idx} className="text-xs bg-primary-50 text-primary-600 px-2 py-0.5 rounded">
+                        {reason}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+          {recommendations.length > 6 && (
+            <div className="text-center mt-4">
+              <Link
+                to="/jobs"
+                className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+              >
+                View all {recommendations.length} recommendations →
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
+      {loadingRecommendations && (
+        <div className="mt-8">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Recommended Jobs</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="card animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+                <div className="h-3 bg-gray-200 rounded w-1/2 mb-2"></div>
+                <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

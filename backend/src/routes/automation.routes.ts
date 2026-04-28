@@ -6,10 +6,12 @@ import { searchJobs, getJobDescription } from '../services/job-scraper.service';
 import { matchResumeToJob } from '../services/job-matching.service';
 import { tailorResume } from '../services/resume-tailoring.service';
 import { extractKeywordsFromResume } from '../services/keyword-extraction.service';
+import { getJobRecommendations } from '../services/recommendation.service';
 import prisma from '../prisma/index';
 import { getAuthUserId } from '../middleware/auth';
 import { ssrfGuard, SSRFError } from '../utils/ssrf';
 import { encryptApiKeys, tryDecryptApiKeys } from '../utils/crypto';
+import { jobSearchLimiter, automationLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -46,7 +48,7 @@ const jobUrlSchema = z.string().url().refine((value) => {
   return true;
 }, 'Invalid URL');
 
-router.post('/trigger', async (req: Request, res: Response) => {
+router.post('/trigger', automationLimiter, async (req: Request, res: Response) => {
   try {
     const userId = getAuthUserId(req);
     if (!userId) {
@@ -114,7 +116,7 @@ router.get('/status', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/search', async (req: Request, res: Response) => {
+router.get('/search', jobSearchLimiter, async (req: Request, res: Response) => {
   try {
     const userId = getAuthUserId(req);
     if (!userId) {
@@ -408,6 +410,32 @@ router.post('/api-keys', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error saving API keys:', error);
     res.status(500).json({ success: false, error: 'Failed to save API keys' });
+  }
+});
+
+// Get job recommendations
+router.get('/recommendations', async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const limit = Math.min(parseInt(req.query.limit as string) || 10, 20);
+    
+    const recommendations = await getJobRecommendations(userId, limit);
+
+    res.json({
+      success: true,
+      data: {
+        recommendations,
+        count: recommendations.length,
+      },
+    });
+  } catch (error) {
+    console.error('Recommendations error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get recommendations' });
   }
 });
 
