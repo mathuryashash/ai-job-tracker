@@ -4,11 +4,14 @@ import path from 'path';
 import fs from 'fs';
 import { z } from 'zod';
 import { extractTextFromPDF, validatePDF, generateSecureFilename } from '../services/resume.service';
+import { parseResumeWithAI } from '../services/resume-parser.service';
 import prisma from '../prisma/index';
 import { addResumeAnalysisJob } from '../queues/index';
 import { analyzeResume } from '../services/ai.service';
 import { createError } from '../middleware/errorHandler';
 import { getAuthUserId, AuthRequest } from '../middleware/auth';
+import { FILE_SIZE_LIMIT } from '../config/constants';
+import { hasEnoughDiskSpace } from '../utils/diskSpace';
 
 const router = Router();
 
@@ -25,9 +28,9 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ 
+const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: FILE_SIZE_LIMIT },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype !== 'application/pdf') {
       cb(createError('Only PDF files are allowed', 400));
@@ -50,6 +53,12 @@ router.post('/upload', upload.single('resume'), async (req: AuthRequest, res: Re
     const validation = validatePDF(req.file);
     if (!validation.valid) {
       throw createError(validation.error || 'Invalid file', 400);
+    }
+
+    // Check disk space before processing upload
+    const hasSpace = await hasEnoughDiskSpace(req.file.size);
+    if (!hasSpace) {
+      throw createError('Insufficient disk space for upload', 507); // 507 Insufficient Storage
     }
 
     const extractedText = await extractTextFromPDF(req.file.path);
@@ -80,11 +89,12 @@ router.post('/upload', upload.single('resume'), async (req: AuthRequest, res: Re
     });
   } catch (error) {
     console.error('Upload error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     if (error instanceof z.ZodError) {
       res.status(400).json({ success: false, error: 'Invalid input', details: error.errors });
       return;
     }
-    res.status(500).json({ success: false, error: 'Failed to upload resume' });
+    res.status(500).json({ success: false, error: 'Failed to upload resume: ' + errorMessage });
   }
 });
 
@@ -221,6 +231,60 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Delete resume error:', error);
     res.status(500).json({ success: false, error: 'Failed to delete resume' });
+  }
+});
+
+// ── POST /api/resumes/:id/parse — AI Parse Resume ──
+
+router.post('/:id/parse', async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = getAuthUserId(req);
+
+    if (!userId) {
+      throw createError('Unauthorized', 401);
+    }
+
+    const resume = await prisma.resume.findUnique({ where: { id } });
+    if (!resume) {
+      throw createError('Resume not found', 404);
+    }
+    if (resume.userId !== userId) {
+      throw createError('Forbidden', 403);
+    }
+
+    // Use extracted text or extract from PDF
+    const extractedText = resume.extractedText || await extractTextFromPDF(resume.path);
+    if (!extractedText || extractedText.trim().length < 50) {
+      throw createError('Resume has no extractable text', 400);
+    }
+
+    // Parse with AI
+    const parsed = await parseResumeWithAI(extractedText);
+
+    // Save structured data to database
+    const updatedResume = await prisma.resume.update({
+      where: { id },
+      data: {
+        extractedText, // Ensure extracted text is stored
+        structuredData: parsed as any,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: updatedResume.id,
+        structuredData: parsed,
+      },
+    });
+  } catch (error) {
+    console.error('Parse error:', error);
+    if (error instanceof z.ZodError) {
+      res.status(400).json({ success: false, error: 'Invalid input', details: error.errors });
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to parse resume' });
   }
 });
 
