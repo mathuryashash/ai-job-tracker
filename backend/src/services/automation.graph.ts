@@ -7,8 +7,9 @@ import {
   type ExtractedKeywords,
 } from './keyword-extraction.service';
 import { matchResumeToJob, meetsThreshold, type MatchResult } from './job-matching.service';
-import { getJobDescription, searchJobs, type Job, type JobSearchParams } from './job-scraper.service';
+import { getJobDescription, searchJobs, type Job, type JobSearchParams, type UserApiKeys } from './job-scraper.service';
 import { tailorResume, type TailoredResume } from './resume-tailoring.service';
+import { tryDecryptApiKeys } from '../utils/crypto';
 
 export interface AutomationGraphState {
   userId: string;
@@ -65,7 +66,7 @@ export interface AutomationGraphRunnable {
 }
 
 export interface AutomationGraphDependencies {
-  searchJobs: (params: JobSearchParams) => Promise<Job[]>;
+  searchJobs: (params: JobSearchParams, userApiKeys?: UserApiKeys) => Promise<Job[]>;
   findExistingApplication: (input: { userId: string; jobUrl: string }) => Promise<{ id: string } | null>;
   getJobDescription: (url: string) => Promise<string>;
   matchResumeToJob: (resumeText: string, jobDescription: string) => Promise<MatchResult>;
@@ -134,23 +135,36 @@ const EMPTY_MATCH_RESULT: MatchResult = {
 };
 
 export async function loadUserResumeNode(state: AutomationGraphState): Promise<{ resumeText: string }> {
-  const user = await prisma.user.findUnique({ where: { id: state.userId } });
-  if (!user) {
-    throw new Error('User not found');
-  }
+   const user = await prisma.user.findUnique({ where: { id: state.userId } });
+   if (!user) {
+     throw new Error('User not found');
+   }
 
-  const resumes = await prisma.resume.findMany({
-    where: { userId: state.userId },
-    orderBy: { createdAt: 'desc' },
-    take: 1,
-  });
+   let resumes;
+   if (state.config.resumeId) {
+     // Use specific resume ID if provided
+     resumes = await prisma.resume.findMany({
+       where: { 
+         id: state.config.resumeId,
+         userId: state.userId 
+       },
+       take: 1,
+     });
+   } else {
+     // Default to most recent resume
+     resumes = await prisma.resume.findMany({
+       where: { userId: state.userId },
+       orderBy: { createdAt: 'desc' },
+       take: 1,
+     });
+   }
 
-  if (resumes.length === 0) {
-    throw new Error('No resume found. Please upload a resume first.');
-  }
+   if (resumes.length === 0) {
+     throw new Error('No resume found. Please upload a resume first.');
+   }
 
-  return { resumeText: resumes[0].extractedText || '' };
-}
+   return { resumeText: resumes[0].extractedText || '' };
+ }
 
 export async function extractKeywordsNode(state: AutomationGraphState): Promise<ExtractedKeywords | undefined> {
   if (state.config.useAIKeywords === false || !state.resumeText) {
@@ -183,9 +197,21 @@ export async function searchJobsNode(
   state: AutomationGraphState,
   deps: SearchJobsDependencies
 ): Promise<Pick<AutomationGraphState, 'jobs'>> {
+  // Fetch user's API keys from database and decrypt them
+  const user = await prisma.user.findUnique({
+    where: { id: state.userId },
+    select: { preferences: true },
+  });
+  
+  // Use tryDecryptApiKeys for backward compatibility with unencrypted data
+  const userApiKeys = tryDecryptApiKeys((user?.preferences as Record<string, unknown>)?.apiKeys) as UserApiKeys | undefined;
+
   const allJobs: Job[] = [];
   for (const query of state.searchQueries) {
-    const jobs = await deps.searchJobs({ keywords: query, location: state.config.location });
+    const jobs = await deps.searchJobs(
+      { keywords: query, location: state.config.location },
+      userApiKeys
+    );
     allJobs.push(...jobs);
   }
 
@@ -356,20 +382,37 @@ function createDefaultDependencies(): AutomationGraphDependencies {
     },
     tailorResume,
     generateCoverLetter,
-    createApplication: async ({ userId, job, jobDescription }) =>
-      prisma.jobApplication.create({
-        data: {
-          userId,
-          companyName: job.company,
-          positionTitle: job.title,
-          jobDescription,
-          jobUrl: job.url,
-          status: 'applied',
-          source: 'scraped',
-          applicationDate: new Date(),
-        } as any,
-        select: { id: true },
-      }),
+     createApplication: async ({ userId, job, jobDescription }) => {
+       try {
+         return await prisma.jobApplication.create({
+           data: {
+             userId,
+             companyName: job.company,
+             positionTitle: job.title,
+             jobDescription,
+             jobUrl: job.url,
+             status: 'applied',
+             source: 'scraped',
+             applicationDate: new Date(),
+           } as any,
+           select: { id: true },
+         });
+        } catch (error: any) {
+          // Handle unique constraint violation on userId + jobUrl
+          if (error.code === 'P2002' && error.meta?.target?.includes('jobUrl')) {
+            // Find the existing application and return its ID
+            const existingApp = await prisma.jobApplication.findFirst({
+              where: {
+                userId,
+                jobUrl: job.url,
+              },
+              select: { id: true },
+            });
+            return { id: existingApp?.id ?? '' };
+          }
+          throw error;
+        }
+     },
     createCoverLetter: async ({ userId, applicationId, content, jobDescription }) => {
       await prisma.coverLetter.create({
         data: {

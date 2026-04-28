@@ -1,7 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import dns from 'dns/promises';
-import net from 'net';
 import { triggerAutomation } from '../services/scheduler.service';
 import { getAutomationStatus } from '../services/auto-apply.service';
 import { searchJobs, getJobDescription } from '../services/job-scraper.service';
@@ -10,6 +8,8 @@ import { tailorResume } from '../services/resume-tailoring.service';
 import { extractKeywordsFromResume } from '../services/keyword-extraction.service';
 import prisma from '../prisma/index';
 import { getAuthUserId } from '../middleware/auth';
+import { ssrfGuard, SSRFError } from '../utils/ssrf';
+import { encryptApiKeys, tryDecryptApiKeys } from '../utils/crypto';
 
 const router = Router();
 
@@ -45,75 +45,6 @@ const jobUrlSchema = z.string().url().refine((value) => {
   }
   return true;
 }, 'Invalid URL');
-
-function isPrivateIp(ip: string): boolean {
-  const normalized = ip.toLowerCase();
-  if (normalized === '::1' || normalized === '::ffff:127.0.0.1') {
-    return true;
-  }
-
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split('.').map(Number);
-    if (a === 10 || a === 127 || a === 0) {
-      return true;
-    }
-    if (a === 169 && b === 254) {
-      return true;
-    }
-    if (a === 192 && b === 168) {
-      return true;
-    }
-    if (a === 172 && b >= 16 && b <= 31) {
-      return true;
-    }
-    return false;
-  }
-
-  if (net.isIPv6(ip)) {
-    if (normalized.startsWith('fc') || normalized.startsWith('fd')) {
-      return true;
-    }
-    if (normalized.startsWith('fe80:')) {
-      return true;
-    }
-    if (normalized.startsWith('::ffff:10.') || normalized.startsWith('::ffff:192.168.')) {
-      return true;
-    }
-    const mapped172 = normalized.match(/^::ffff:172\.(\d+)\./);
-    if (mapped172) {
-      const second = parseInt(mapped172[1], 10);
-      if (second >= 16 && second <= 31) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  return true;
-}
-
-async function validateOutboundJobUrl(url: string): Promise<boolean> {
-  const parsed = new URL(url);
-  const host = parsed.hostname.toLowerCase();
-
-  if (host === 'localhost' || host.endsWith('.local')) {
-    return false;
-  }
-
-  if (net.isIP(host)) {
-    return !isPrivateIp(host);
-  }
-
-  try {
-    const records = await dns.lookup(host, { all: true, verbatim: true });
-    if (records.length === 0) {
-      return false;
-    }
-    return records.every((record) => !isPrivateIp(record.address));
-  } catch (_error) {
-    return false;
-  }
-}
 
 router.post('/trigger', async (req: Request, res: Response) => {
   try {
@@ -193,12 +124,23 @@ router.get('/search', async (req: Request, res: Response) => {
 
     const data = searchSchema.parse(req.query);
 
-    const jobs = await searchJobs({
-      keywords: data.keywords,
-      location: data.location,
-      remote: data.remote,
-      fullTime: data.fullTime,
+    // Fetch user's API keys and decrypt
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
     });
+    // Use tryDecryptApiKeys for backward compatibility with unencrypted data
+    const userApiKeys = tryDecryptApiKeys((user?.preferences as any)?.apiKeys);
+
+    const jobs = await searchJobs(
+      {
+        keywords: data.keywords,
+        location: data.location,
+        remote: data.remote,
+        fullTime: data.fullTime,
+      },
+      userApiKeys
+    );
 
     res.json({ success: true, data: jobs });
   } catch (error) {
@@ -315,10 +257,15 @@ router.get('/jobs', async (req: Request, res: Response) => {
     }
 
     const safeUrl = jobUrlSchema.parse(url);
-    const canFetch = await validateOutboundJobUrl(safeUrl);
-    if (!canFetch) {
-      res.status(400).json({ success: false, error: 'Invalid URL' });
-      return;
+
+    try {
+      await ssrfGuard(safeUrl);
+    } catch (guardError) {
+      if (guardError instanceof SSRFError) {
+        res.status(400).json({ success: false, error: `SSRF protection: ${guardError.reason}` });
+        return;
+      }
+      throw guardError;
     }
 
     const description = await getJobDescription(safeUrl);
@@ -373,8 +320,7 @@ router.get('/sources', async (_req: Request, res: Response) => {
   res.json({
     success: true,
     data: [
-      { name: 'LinkedIn (Apify)', type: 'scraping', requiresKey: true, description: 'LinkedIn job listings via Apify scraper' },
-      { name: 'Indeed (Apify)', type: 'scraping', requiresKey: true, description: 'Indeed job listings via Apify scraper' },
+      { name: 'Apify', type: 'scraping', requiresKey: true, description: 'Use Apify to scrape LinkedIn, Indeed, Internshala, and more' },
       { name: 'Remotive', type: 'api', requiresKey: false, description: 'Remote job board (free API)' },
       { name: 'We Work Remotely', type: 'api', requiresKey: false, description: 'Remote job listings (free API)' },
       { name: 'Remote OK', type: 'api', requiresKey: false, description: 'Remote job board (free API)' },
@@ -385,8 +331,162 @@ router.get('/sources', async (_req: Request, res: Response) => {
       { name: 'Jooble', type: 'api', requiresKey: true, description: 'Job aggregator API' },
       { name: 'Indeed API', type: 'api', requiresKey: true, description: 'Indeed publisher API' },
       { name: 'Adzuna', type: 'api', requiresKey: true, description: 'Job search API' },
+      { name: 'Internshala', type: 'scraping', requiresKey: true, description: 'Indian job portal (via Apify)' },
     ],
   });
 });
+
+// Get user's API keys
+router.get('/api-keys', async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+
+    // Decrypt API keys with backward compatibility for unencrypted data
+    const apiKeys = tryDecryptApiKeys((user?.preferences as any)?.apiKeys);
+    
+    // Return keys masked (except for newly entered ones)
+    const maskedKeys: Record<string, string> = {};
+    for (const [service, value] of Object.entries(apiKeys)) {
+      if (typeof value === 'string' && value) {
+        maskedKeys[service] = value.length > 4 ? '****' + value.slice(-4) : '****';
+      } else if (typeof value === 'object' && value !== null) {
+        maskedKeys[service] = 'configured';
+      }
+    }
+
+    res.json({ success: true, data: maskedKeys });
+  } catch (error) {
+    console.error('Error fetching API keys:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch API keys' });
+  }
+});
+
+// Save user's API keys (encrypt before storing)
+router.post('/api-keys', async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const { apiKeys } = req.body;
+    
+    if (!apiKeys || typeof apiKeys !== 'object') {
+      res.status(400).json({ success: false, error: 'Invalid API keys format' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+
+    const currentPrefs = (user?.preferences as any) || {};
+    // Encrypt the API keys before saving to database
+    const encryptedApiKeys = encryptApiKeys(apiKeys);
+    const updatedPrefs = {
+      ...currentPrefs,
+      apiKeys: encryptedApiKeys,
+    };
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { preferences: updatedPrefs },
+    });
+
+    res.json({ success: true, data: { message: 'API keys saved successfully' } });
+  } catch (error) {
+    console.error('Error saving API keys:', error);
+    res.status(500).json({ success: false, error: 'Failed to save API keys' });
+  }
+});
+
+// Get automation stats
+router.get('/stats', async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    const applications = await prisma.jobApplication.findMany({
+      where: { userId },
+      select: {
+        status: true,
+        matchScore: true,
+        applicationDate: true,
+        scrapedJob: {
+          select: { source: true },
+        },
+      },
+    });
+
+    const statusCounts: Record<string, number> = {
+      todo: 0,
+      applied: 0,
+      interviewing: 0,
+      offer: 0,
+      rejected: 0,
+    };
+    const sourceCounts: Record<string, number> = {};
+    let totalMatchScore = 0;
+    let matchScoreCount = 0;
+
+    for (const app of applications) {
+      if (app.status === 'todo' || app.status === 'applied' || app.status === 'interviewing' || app.status === 'offer' || app.status === 'rejected') {
+        statusCounts[app.status]++;
+      }
+      if (app.scrapedJob?.source) {
+        sourceCounts[app.scrapedJob.source] = (sourceCounts[app.scrapedJob.source] || 0) + 1;
+      }
+      if (typeof app.matchScore === 'number') {
+        totalMatchScore += app.matchScore;
+        matchScoreCount++;
+      }
+    }
+
+    const fourWeeksAgo = new Date();
+    fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
+    const weeklyTrends: Record<string, number> = {};
+    for (const app of applications) {
+      if (app.applicationDate && app.applicationDate >= fourWeeksAgo) {
+        const week = getWeekKey(app.applicationDate);
+        weeklyTrends[week] = (weeklyTrends[week] || 0) + 1;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        total: applications.length,
+        statusCounts,
+        sourceCounts,
+        averageMatchScore: matchScoreCount > 0 ? Math.round(totalMatchScore / matchScoreCount) : 0,
+        weeklyTrends,
+      },
+    });
+  } catch (error) {
+    console.error('Stats error:', error);
+    res.status(500).json({ success: false, error: 'Failed to get stats' });
+  }
+});
+
+function getWeekKey(date: Date): string {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return d.toISOString().split('T')[0];
+}
 
 export default router;
