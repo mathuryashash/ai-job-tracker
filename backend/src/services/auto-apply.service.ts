@@ -20,14 +20,16 @@ export interface AutoApplyResult {
 }
 
 export interface AutomationConfig {
-  userId: string;
-  keywords?: string;
-  location?: string;
-  matchThreshold: number;
-  autoTailorResume: boolean;
-  autoGenerateCoverLetter: boolean;
-  useAIKeywords?: boolean;
-}
+   userId: string;
+   keywords?: string;
+   location?: string;
+   matchThreshold: number;
+   autoTailorResume: boolean;
+   autoGenerateCoverLetter: boolean;
+   useAIKeywords?: boolean;
+   resumeId?: string;
+   remote?: boolean;
+ }
 
 export interface AutomationResult {
   results: AutoApplyResult[];

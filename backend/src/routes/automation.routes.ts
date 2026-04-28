@@ -18,6 +18,7 @@ const router = Router();
 const triggerSchema = z.object({
   keywords: z.string().optional(),
   location: z.string().optional(),
+  remote: z.coerce.boolean().optional(),
   matchThreshold: z.number().min(0).max(100).default(70),
   autoTailorResume: z.boolean().default(true),
   autoGenerateCoverLetter: z.boolean().default(true),
@@ -65,7 +66,8 @@ router.post('/trigger', automationLimiter, async (req: Request, res: Response) =
       data.matchThreshold,
       data.autoTailorResume,
       data.autoGenerateCoverLetter,
-      data.useAIKeywords
+      data.useAIKeywords,
+      data.remote
     );
 
     const { results, extractedKeywords, sourceStats } = automationResult;

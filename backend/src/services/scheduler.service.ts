@@ -20,7 +20,7 @@ export interface ScheduledTask {
 }
 
 let schedulerInterval: NodeJS.Timeout | null = null;
-let isSchedulerRunning = false;
+export let isSchedulerRunning = false;
 
 export async function initScheduler() {
   console.log('Initializing job search scheduler...');
@@ -73,7 +73,7 @@ function getFrequencyMs(frequency: unknown): number {
   return 24 * 60 * 60 * 1000;
 }
 
-function shouldRunAutomation(automation: Record<string, unknown>, now: Date): boolean {
+export function shouldRunAutomation(automation: Record<string, unknown>, now: Date): boolean {
   const nextRunRaw = automation.nextRun;
   if (typeof nextRunRaw === 'string' || nextRunRaw instanceof Date) {
     const nextRun = new Date(nextRunRaw);
@@ -96,6 +96,8 @@ function shouldRunAutomation(automation: Record<string, unknown>, now: Date): bo
 export async function runScheduledTasks() {
   try {
     const now = new Date();
+    // TODO: after Auth0 migration, use auth0_sub from DB to identify users
+    // Currently users are looked up by id, but should use auth0Sub for proper identification
     const tasks = await prisma.user.findMany({
       where: {
         preferences: {
@@ -112,7 +114,7 @@ export async function runScheduledTasks() {
       if (!automation?.enabled) continue;
       if (!shouldRunAutomation(automation, now)) continue;
 
-      const config: AutomationConfig = {
+const config: AutomationConfig = {
         userId: user.id,
         keywords: typeof automation.keywords === 'string' ? automation.keywords : undefined,
         location: typeof automation.location === 'string' ? automation.location : undefined,
@@ -120,6 +122,7 @@ export async function runScheduledTasks() {
         autoTailorResume: typeof automation.autoTailorResume === 'boolean' ? automation.autoTailorResume : true,
         autoGenerateCoverLetter: typeof automation.autoGenerateCoverLetter === 'boolean' ? automation.autoGenerateCoverLetter : true,
         useAIKeywords: typeof automation.useAIKeywords === 'boolean' ? automation.useAIKeywords : true,
+        remote: typeof automation.remote === 'boolean' ? automation.remote : true,
       };
 
       try {
@@ -174,7 +177,8 @@ export async function triggerAutomation(
   matchThreshold: number = 70,
   autoTailorResume: boolean = true,
   autoGenerateCoverLetter: boolean = true,
-  useAIKeywords: boolean = true
+  useAIKeywords: boolean = true,
+  remote?: boolean
 ) {
   const config: AutomationConfig = {
     userId,
@@ -184,6 +188,7 @@ export async function triggerAutomation(
     autoTailorResume,
     autoGenerateCoverLetter,
     useAIKeywords,
+    remote,
   };
 
   return runAutoApply(config);

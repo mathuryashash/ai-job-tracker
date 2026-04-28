@@ -210,7 +210,7 @@ export async function searchJobsNode(
   const allJobs: Job[] = [];
   for (const query of state.searchQueries) {
     const jobs = await deps.searchJobs(
-      { keywords: query, location: state.config.location },
+      { keywords: query, location: state.config.location, remote: state.config.remote },
       userApiKeys
     );
     allJobs.push(...jobs);
@@ -358,6 +358,19 @@ export async function processJobsNode(
           content: coverLetter,
           jobDescription,
         });
+        
+        // Link the newly created cover letter to the application
+        const createdCoverLetter = await prisma.coverLetter.findFirst({
+          where: { applicationId: application.id },
+          select: { id: true },
+        });
+        
+        if (createdCoverLetter) {
+          await prisma.jobApplication.update({
+            where: { id: application.id },
+            data: { coverLetterId: createdCoverLetter.id },
+          });
+        }
       }
 
       await deps.createActivity({
