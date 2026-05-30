@@ -3,9 +3,14 @@ import path from 'path';
 import pdf from 'pdf-parse';
 
 export async function extractTextFromPDF(filePath: string): Promise<string> {
-  const dataBuffer = fs.readFileSync(filePath);
-  const data = await pdf(dataBuffer);
-  return data.text;
+  try {
+    const dataBuffer = fs.readFileSync(filePath);
+    const data = await pdf(dataBuffer);
+    return data.text || '';
+  } catch (error) {
+    console.error('PDF extraction error:', error);
+    return '';
+  }
 }
 
 export function validatePDF(file: Express.Multer.File): { valid: boolean; error?: string } {

@@ -1,16 +1,18 @@
 import crypto from 'crypto';
+import { getEncryptionKey as getEnvEncryptionKey } from '../config/env';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 
 /**
- * Get the encryption key from environment variables.
- * Uses ENCRYPTION_KEY if set, otherwise falls back to JWT_SECRET.
+ * Get the encryption key from environment variables via centralized env validator.
+ * ENCRYPTION_KEY is preferred; falls back to JWT_SECRET when not separately set.
  * The key is hashed with SHA-256 to produce a 32-byte key for AES-256.
+ * Both ENCRYPTION_KEY and JWT_SECRET are validated to be >= 32 chars by env.ts.
  */
 export function getEncryptionKey(): Buffer {
-  const key = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || 'dev-secret-change-in-production';
+  const key = getEnvEncryptionKey();
   return crypto.createHash('sha256').update(key).digest();
 }
 

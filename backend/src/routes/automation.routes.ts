@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { triggerAutomation } from '../services/scheduler.service';
+import { automationQueue } from '../queues/index';
 import { getAutomationStatus } from '../services/auto-apply.service';
 import { searchJobs, getJobDescription } from '../services/job-scraper.service';
 import { matchResumeToJob } from '../services/job-matching.service';
@@ -11,7 +11,7 @@ import prisma from '../prisma/index';
 import { getAuthUserId } from '../middleware/auth';
 import { ssrfGuard, SSRFError } from '../utils/ssrf';
 import { encryptApiKeys, tryDecryptApiKeys } from '../utils/crypto';
-import { jobSearchLimiter, automationLimiter } from '../middleware/rateLimiter';
+import { jobSearchLimiter, automationLimiter, apiKeysLimiter } from '../middleware/rateLimiter';
 
 const router = Router();
 
@@ -59,36 +59,30 @@ router.post('/trigger', automationLimiter, async (req: Request, res: Response) =
 
     const data = triggerSchema.parse(req.body);
 
-    const automationResult = await triggerAutomation(
+    // Enqueue to BullMQ — return immediately with 202 Accepted.
+    // The heavy lifting (search, AI filtering, DB writes) happens in automation.worker.ts
+    const job = await automationQueue.add('run-automation', {
       userId,
-      data.keywords,
-      data.location,
-      data.matchThreshold,
-      data.autoTailorResume,
-      data.autoGenerateCoverLetter,
-      data.useAIKeywords,
-      data.remote
-    );
+      keywords: data.keywords,
+      location: data.location,
+      matchThreshold: data.matchThreshold,
+      autoTailorResume: data.autoTailorResume,
+      autoGenerateCoverLetter: data.autoGenerateCoverLetter,
+      useAIKeywords: data.useAIKeywords,
+      remote: data.remote,
+    }, {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: 50,
+      removeOnFail: 100,
+    });
 
-    const { results, extractedKeywords, sourceStats } = automationResult;
-
-    res.json({
+    res.status(202).json({
       success: true,
       data: {
-        totalJobs: results.length,
-        applicationsCreated: results.filter(r => r.applicationCreated).length,
-        sourceStats,
-        extractedKeywords,
-        results: results.map(r => ({
-          jobTitle: r.job.title,
-          company: r.job.company,
-          matchPercentage: r.matchResult.matchPercentage,
-          applicationCreated: r.applicationCreated,
-          applicationId: r.applicationId,
-          source: r.job.source,
-          coverLetter: r.coverLetter,
-          error: r.error,
-        })),
+        jobId: job.id,
+        status: 'queued',
+        message: 'Automation job queued. Connect via WebSocket to receive progress updates.',
       },
     });
   } catch (error) {
@@ -96,10 +90,11 @@ router.post('/trigger', automationLimiter, async (req: Request, res: Response) =
       res.status(400).json({ success: false, error: 'Validation failed', details: error.errors });
       return;
     }
-    console.error('Automation error:', error);
-    res.status(500).json({ success: false, error: 'Failed to run automation' });
+    console.error('Automation trigger error:', error);
+    res.status(500).json({ success: false, error: 'Failed to queue automation job' });
   }
 });
+
 
 router.get('/status', async (req: Request, res: Response) => {
   try {
@@ -143,7 +138,8 @@ router.get('/search', jobSearchLimiter, async (req: Request, res: Response) => {
         remote: data.remote,
         fullTime: data.fullTime,
       },
-      userApiKeys
+      userApiKeys,
+      userId
     );
 
     res.json({ success: true, data: jobs });
@@ -340,8 +336,8 @@ router.get('/sources', async (_req: Request, res: Response) => {
   });
 });
 
-// Get user's API keys
-router.get('/api-keys', async (req: Request, res: Response) => {
+// Get user's API keys - more permissive limiter for fetching
+router.get('/api-keys', apiKeysLimiter, async (req: Request, res: Response) => {
   try {
     const userId = getAuthUserId(req);
     if (!userId) {
@@ -374,8 +370,8 @@ router.get('/api-keys', async (req: Request, res: Response) => {
   }
 });
 
-// Save user's API keys (encrypt before storing)
-router.post('/api-keys', async (req: Request, res: Response) => {
+// Save user's API keys (encrypt before storing) - more permissive limiter
+router.post('/api-keys', apiKeysLimiter, async (req: Request, res: Response) => {
   try {
     const userId = getAuthUserId(req);
     if (!userId) {
@@ -442,6 +438,53 @@ router.get('/recommendations', async (req: Request, res: Response) => {
 });
 
 // Get automation stats
+// Clear stuck automation - reset automation state for user
+router.post('/clear-stuck', async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthUserId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    // Clear any stale automation status from user preferences
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferences: true },
+    });
+
+    if (user?.preferences) {
+      const prefs = user.preferences as Record<string, unknown>;
+      if (prefs.automation) {
+        const automation = prefs.automation as Record<string, unknown>;
+        // Reset status to idle if it was stuck in 'running'
+        if (automation.status === 'running') {
+          await prisma.user.update({
+            where: { id: userId },
+            data: {
+              preferences: {
+                ...prefs,
+                automation: {
+                  ...automation,
+                  status: 'idle',
+                  lastError: 'Cleared stuck state via /clear-stuck',
+                },
+              },
+            },
+          });
+          res.json({ success: true, data: { message: 'Stuck automation state cleared' } });
+          return;
+        }
+      }
+    }
+
+    res.json({ success: true, data: { message: 'No stuck automation state found' } });
+  } catch (error) {
+    console.error('Clear stuck error:', error);
+    res.status(500).json({ success: false, error: 'Failed to clear stuck automation' });
+  }
+});
+
 router.get('/stats', async (req: Request, res: Response) => {
   try {
     const userId = getAuthUserId(req);

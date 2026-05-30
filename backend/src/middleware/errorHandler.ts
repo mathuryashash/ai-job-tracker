@@ -61,7 +61,9 @@ export const errorHandler = (
     success: false,
     error: message,
     ...(details && { details }),
-    ...(process.env.NODE_ENV === 'development' && process.env.EXPOSE_ERROR_STACKS === 'true' && { stack: err instanceof Error ? err.stack : undefined }),
+    // Only expose stack traces in development with explicit opt-in
+    // Never expose in production regardless of EXPOSE_ERROR_STACKS setting
+    ...(process.env.NODE_ENV !== 'production' && process.env.EXPOSE_ERROR_STACKS === 'true' && { stack: err instanceof Error ? err.stack : undefined }),
   });
 };
 

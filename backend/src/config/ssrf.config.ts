@@ -1,0 +1,67 @@
+export interface SSRFConfig {
+  allowedDomains?: string[];
+  allowedPatterns?: RegExp[];
+  timeout?: number;
+  maxResponseSize?: number;
+  allowedProtocols?: string[];
+}
+
+export const ssrfConfig: Required<SSRFConfig> = {
+  allowedDomains: [
+    'linkedin.com',
+    'www.linkedin.com',
+    'jobs.linkedin.com',
+    'indeed.com',
+    'www.indeed.com',
+    'glassdoor.com',
+    'www.glassdoor.com',
+    'greenhouse.io',
+    'www.greenhouse.io',
+    'lever.co',
+    'www.lever.co',
+    'workday.com',
+    'www.workday.com',
+    'ashbyhq.com',
+    'jobs.ashbyhq.com',
+    'remotive.com',
+    'weworkremotely.com',
+    'remoteok.com',
+    'wellfound.com',
+    'api.wellfound.com',
+    'remote.co',
+    'flexjobs.com',
+    'www.flexjobs.com',
+    'jooble.org',
+    'adzuna.com',
+    'api.adzuna.com',
+    'arbeitnow.com',
+    'www.arbeitnow.com',
+    'github.com',
+    'api.github.com',
+    'apify.com',
+    'api.apify.com',
+  ],
+  allowedPatterns: [
+    /^https?:\/\/([a-z0-9-]+\.)?linkedin\.com\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?indeed\.com\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?glassdoor\.com\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?greenhouse\.io\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?lever\.co\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?workday\.com\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?ashbyhq\.com\/.*/i,
+    /^https?:\/\/remotive\.com\/.*/i,
+    /^https?:\/\/weworkremotely\.com\/.*/i,
+    /^https?:\/\/remoteok\.com\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?wellfound\.com\/.*/i,
+    /^https?:\/\/remote\.co\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?flexjobs\.com\/.*/i,
+    /^https?:\/\/jooble\.org\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?adzuna\.com\/.*/i,
+    /^https?:\/\/([a-z0-9-]+\.)?arbeitnow\.com\/.*/i,
+    /^https?:\/\/api\.apify\.com\/.*/i,
+    /^https?:\/\/api\.github\.com\/.*/i,
+  ],
+  timeout: 10000,
+  maxResponseSize: 1024 * 1024,
+  allowedProtocols: ['http:', 'https:'],
+};

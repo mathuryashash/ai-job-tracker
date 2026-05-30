@@ -3,6 +3,7 @@ import { z, ZodError } from 'zod';
 import prisma from '../prisma/index';
 import { createError } from '../middleware/errorHandler';
 import { getAuthUserId, AuthRequest } from '../middleware/auth';
+import { VALID_JOB_STATUSES, PAGINATION_DEFAULT_LIMIT, PAGINATION_MAX_LIMIT } from '../config/constants';
 
 const router = Router();
 
@@ -19,7 +20,7 @@ const updateApplicationSchema = z.object({
   positionTitle: z.string().min(1).optional(),
   jobDescription: z.string().optional(),
   jobUrl: z.string().url().optional().or(z.literal('')),
-  status: z.enum(['todo', 'applied', 'interviewing', 'offer', 'rejected']).optional(),
+  status: z.enum(VALID_JOB_STATUSES).optional(),
   resumeId: z.string().optional().nullable(),
   coverLetterId: z.string().optional().nullable(),
   applicationDate: z.string().datetime().optional().nullable(),
@@ -32,7 +33,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       throw createError('Unauthorized', 401);
     }
 
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const limit = Math.min(parseInt(req.query.limit as string) || PAGINATION_DEFAULT_LIMIT, PAGINATION_MAX_LIMIT);
     const offset = Math.max(parseInt(req.query.offset as string) || 0, 0);
 
     const [applications, total] = await Promise.all([
@@ -211,7 +212,7 @@ router.post('/:id/move', async (req: AuthRequest, res: Response) => {
       throw createError('Unauthorized', 401);
     }
 
-    if (!['todo', 'applied', 'interviewing', 'offer', 'rejected'].includes(status)) {
+    if (!(VALID_JOB_STATUSES as readonly string[]).includes(status)) {
       throw createError('Invalid status', 400);
     }
 

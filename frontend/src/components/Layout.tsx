@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { LayoutDashboard, FileText, Briefcase, Bot, BarChart3 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface LayoutProps {
@@ -7,10 +8,11 @@ interface LayoutProps {
 }
 
 const navItems = [
-  { path: '/', label: 'Dashboard', icon: '📊' },
-  { path: '/resume', label: 'Resume Analyzer', icon: '📄' },
-  { path: '/jobs', label: 'Job Tracker', icon: '💼' },
-  { path: '/automation', label: 'Auto Apply', icon: '🤖' },
+  { path: '/', label: 'Dashboard', Icon: LayoutDashboard },
+  { path: '/resume', label: 'Resume Analyzer', Icon: FileText },
+  { path: '/jobs', label: 'Job Tracker', Icon: Briefcase },
+  { path: '/automation', label: 'Auto Apply', Icon: Bot },
+  { path: '/dashboard/analysis', label: 'Analysis', Icon: BarChart3 },
 ];
 
 export default function Layout({ children }: LayoutProps) {
@@ -24,18 +26,19 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex items-center space-x-8">
             <h1 className="text-xl font-bold text-primary-600">AI Resume Tracker</h1>
             <nav className="flex space-x-4">
-              {navItems.map((item) => (
+              {navItems.map(({ path, label, Icon }) => (
                 <Link
-                  key={item.path}
-                  to={item.path}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    location.pathname === item.path
+                  key={path}
+                  to={path}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    location.pathname === path
                       ? 'bg-primary-50 text-primary-700'
                       : 'text-gray-600 hover:bg-gray-100'
                   }`}
+                  aria-current={location.pathname === path ? 'page' : undefined}
                 >
-                  <span className="mr-2">{item.icon}</span>
-                  {item.label}
+                  <Icon className="w-4 h-4" aria-hidden="true" />
+                  {label}
                 </Link>
               ))}
             </nav>

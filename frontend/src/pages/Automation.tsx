@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 interface SourceInfo {
   name: string;
@@ -34,6 +36,16 @@ interface ExtractedKeywords {
   suggestedTitles: string[];
 }
 
+interface ApiKeys {
+  apify?: string;
+  jooble?: string;
+  indeed?: string;
+  flexjobs?: string;
+  adzuna_appId?: string;
+  adzuna_apiKey?: string;
+  internshala?: string;
+}
+
 export default function Automation() {
   const [keywords, setKeywords] = useState('');
   const [location, setLocation] = useState('');
@@ -49,11 +61,83 @@ export default function Automation() {
   const [jobSources, setJobSources] = useState<SourceInfo[]>([]);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [showSources, setShowSources] = useState(false);
+  const [showApiKeys, setShowApiKeys] = useState(false);
+  const [apiKeys, setApiKeys] = useState<ApiKeys>({});
+  const [apiKeysSaved, setApiKeysSaved] = useState(false);
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentPhase, setCurrentPhase] = useState('');
+  const [jobId, setJobId] = useState<string | null>(null);
+
+  const { token } = useAuth();
+  const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:3001/ws`;
+  const { subscribe, isConnected } = useWebSocket({ token: token ?? '', wsUrl });
+
+  // ── Wire real WebSocket progress events ────────────────────────────────────
+  const activeJobIdRef = useRef<string | null>(null);
+
+  const handleWsProgress = useCallback((data: unknown) => {
+    const d = data as any;
+    // Only handle events for the current job
+    if (activeJobIdRef.current && d.jobId && d.jobId !== activeJobIdRef.current) return;
+    setProgress(d.progress ?? 0);
+    setCurrentPhase(d.message ?? d.stage ?? '');
+  }, []);
+
+  const handleWsComplete = useCallback((data: unknown) => {
+    const d = data as any;
+    if (activeJobIdRef.current && d.jobId && d.jobId !== activeJobIdRef.current) return;
+    setProgress(100);
+    setCurrentPhase('Complete!');
+    setStatus('completed');
+    setLoading(false);
+    activeJobIdRef.current = null;
+    // Refresh the page results by polling the status endpoint
+    axios.get('/api/automation/status').then(res => {
+      if (res.data.success) setResults(res.data.data);
+    }).catch(console.error);
+  }, []);
+
+  const handleWsError = useCallback((data: unknown) => {
+    const d = data as any;
+    if (activeJobIdRef.current && d.jobId && d.jobId !== activeJobIdRef.current) return;
+    setStatus('idle');
+    setLoading(false);
+    alert(d.error ?? 'Automation failed');
+    activeJobIdRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const unsubs = [
+      subscribe('automation:progress', handleWsProgress),
+      subscribe('automation:complete', handleWsComplete),
+      subscribe('automation:error', handleWsError),
+    ];
+    return () => unsubs.forEach(fn => fn());
+  }, [subscribe, handleWsProgress, handleWsComplete, handleWsError]);
+
+  const getAutomationErrorMessage = (error: any): string => {
+    const apiMessage = error?.response?.data?.error;
+    if (typeof apiMessage === 'string' && apiMessage.trim()) {
+      if (apiMessage.includes('No resume found')) {
+        return 'No resume found. Please upload your resume in Resume Analyzer first.';
+      }
+      if (apiMessage.includes('No search keywords available')) {
+        return 'No search keywords available. Add keywords manually or upload a detailed resume.';
+      }
+      return apiMessage;
+    }
+    if (error?.response?.status === 429) {
+      return 'Too many automation requests. Please wait a minute and try again.';
+    }
+    return 'Failed to run automation';
+  };
 
   useEffect(() => {
     const savedLocation = localStorage.getItem('automationLocation');
     if (savedLocation) setLocation(savedLocation);
     fetchSources();
+    fetchApiKeys();
   }, []);
 
   const fetchSources = async () => {
@@ -64,6 +148,41 @@ export default function Automation() {
       }
     } catch (error) {
       console.error('Failed to fetch sources:', error);
+    }
+  };
+
+  const fetchApiKeys = async () => {
+    try {
+      const response = await axios.get('/api/automation/api-keys');
+      if (response.data.success) {
+        setApiKeys(response.data.data as ApiKeys);
+      }
+    } catch (error) {
+      console.error('Failed to fetch API keys:', error);
+    }
+  };
+
+  const saveApiKeys = async () => {
+    setApiKeysLoading(true);
+    try {
+      const keysToSave: Record<string, string | { appId?: string; apiKey?: string }> = {};
+      if (apiKeys.apify) keysToSave.apify = apiKeys.apify;
+      if (apiKeys.jooble) keysToSave.jooble = apiKeys.jooble;
+      if (apiKeys.indeed) keysToSave.indeed = apiKeys.indeed;
+      if (apiKeys.flexjobs) keysToSave.flexjobs = apiKeys.flexjobs;
+      if (apiKeys.adzuna_appId || apiKeys.adzuna_apiKey) {
+        keysToSave.adzuna = { appId: apiKeys.adzuna_appId || undefined, apiKey: apiKeys.adzuna_apiKey || undefined };
+      }
+      if (apiKeys.internshala) keysToSave.internshala = apiKeys.internshala;
+
+      await axios.post('/api/automation/api-keys', { apiKeys: keysToSave });
+      setApiKeysSaved(true);
+      setTimeout(() => setApiKeysSaved(false), 3000);
+    } catch (error) {
+      console.error('Failed to save API keys:', error);
+      alert('Failed to save API keys');
+    } finally {
+      setApiKeysLoading(false);
     }
   };
 
@@ -83,11 +202,18 @@ export default function Automation() {
   };
 
   const handleRunAutomation = async () => {
+    if (!isConnected) {
+      alert('WebSocket not connected. Please wait a moment and try again.');
+      return;
+    }
+
     setLoading(true);
     setStatus('running');
     setResults([]);
     setExtractedKeywords(null);
     setCopiedIndex(null);
+    setProgress(5);
+    setCurrentPhase('Queuing automation job…');
 
     const sourceNames = [
       'LinkedIn (Apify)', 'Indeed (Apify)', 'Remotive', 'We Work Remotely',
@@ -102,6 +228,7 @@ export default function Automation() {
     })));
 
     try {
+      // 202 Accepted — job enqueued in BullMQ. Progress comes via WebSocket.
       const response = await axios.post('/api/automation/trigger', {
         keywords: keywords || undefined,
         location: location || undefined,
@@ -111,28 +238,22 @@ export default function Automation() {
         useAIKeywords,
       });
 
-      const sourceStats = response.data.data.sourceStats || {};
-      setSources(prev => prev.map(s => ({
-        ...s,
-        jobsFound: sourceStats[s.sourceKey] || 0,
-        status: 'completed' as const,
-      })));
-
-      if (response.data.data.extractedKeywords) {
-        setExtractedKeywords(response.data.data.extractedKeywords);
-      }
-
-      setResults(response.data.data.results);
-      setStatus('completed');
+      const newJobId: string = response.data.data?.jobId;
+      activeJobIdRef.current = newJobId;
+      setJobId(newJobId);
+      setCurrentPhase('Job queued — waiting for results via WebSocket…');
+      setProgress(8);
+      // Loading and status will be updated by handleWsComplete / handleWsError
     } catch (error: any) {
-      console.error('Automation error:', error);
+      console.error('Automation trigger error:', error);
       setSources(prev => prev.map(s => ({ ...s, status: 'failed' as const })));
-      alert(error.response?.data?.error || 'Failed to run automation');
+      alert(getAutomationErrorMessage(error));
       setStatus('idle');
-    } finally {
       setLoading(false);
+      activeJobIdRef.current = null;
     }
   };
+
 
   const applicationsCreated = results.filter(r => r.applicationCreated).length;
   const totalJobsFound = results.length;
@@ -142,13 +263,38 @@ export default function Automation() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Job Automation</h1>
-        <button
-          onClick={() => setShowSources(!showSources)}
-          className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
-        >
-          {showSources ? 'Hide' : 'Show'} Job Sources ({jobSources.length})
-        </button>
+        <div className="flex items-center gap-3">
+          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+            isConnected ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+          }`}>
+            {isConnected ? '● Live' : '○ Connecting…'}
+          </span>
+          <button
+            onClick={() => setShowSources(!showSources)}
+            className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
+          >
+            {showSources ? 'Hide' : 'Show'} Job Sources ({jobSources.length})
+          </button>
+        </div>
       </div>
+
+      {status === 'running' && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-medium text-blue-800">{currentPhase}</span>
+            <span className="text-sm text-blue-600">{progress}%</span>
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-2.5">
+            <div
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-500"
+              style={{ width: `${progress}%` }}
+            ></div>
+          </div>
+          {jobId && (
+            <p className="text-xs text-blue-500 mt-2 font-mono">Job ID: {jobId}</p>
+          )}
+        </div>
+      )}
 
       {showSources && (
         <div className="mb-6 card">
@@ -167,6 +313,118 @@ export default function Automation() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mb-6">
+        <button
+          onClick={() => setShowApiKeys(!showApiKeys)}
+          className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
+        >
+          {showApiKeys ? 'Hide' : 'Manage'} API Keys
+        </button>
+      </div>
+
+      {showApiKeys && (
+        <div className="mb-6 card">
+          <h2 className="text-lg font-semibold text-gray-900 mb-3">API Keys Configuration</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Enter your API keys to enable premium job sources. Keys are stored securely in your account.
+          </p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Apify API Key</label>
+              <input
+                type="password"
+                value={apiKeys.apify || ''}
+                onChange={(e) => setApiKeys({ ...apiKeys, apify: e.target.value })}
+                className="input"
+                placeholder="Enter Apify API key"
+              />
+              <p className="text-xs text-gray-500 mt-1">Used for LinkedIn, Indeed, Internshala scraping</p>
+            </div>
+
+            <div>
+              <label className="label">Jooble API Key</label>
+              <input
+                type="password"
+                value={apiKeys.jooble || ''}
+                onChange={(e) => setApiKeys({ ...apiKeys, jooble: e.target.value })}
+                className="input"
+                placeholder="Enter Jooble API key"
+              />
+            </div>
+
+            <div>
+              <label className="label">Indeed Publisher Key</label>
+              <input
+                type="password"
+                value={apiKeys.indeed || ''}
+                onChange={(e) => setApiKeys({ ...apiKeys, indeed: e.target.value })}
+                className="input"
+                placeholder="Enter Indeed publisher key"
+              />
+            </div>
+
+            <div>
+              <label className="label">FlexJobs API Key</label>
+              <input
+                type="password"
+                value={apiKeys.flexjobs || ''}
+                onChange={(e) => setApiKeys({ ...apiKeys, flexjobs: e.target.value })}
+                className="input"
+                placeholder="Enter FlexJobs API key"
+              />
+            </div>
+
+            <div>
+              <label className="label">Adzuna App ID</label>
+              <input
+                type="password"
+                value={apiKeys.adzuna_appId || ''}
+                onChange={(e) => setApiKeys({ ...apiKeys, adzuna_appId: e.target.value })}
+                className="input"
+                placeholder="Enter Adzuna App ID"
+              />
+            </div>
+
+            <div>
+              <label className="label">Adzuna API Key</label>
+              <input
+                type="password"
+                value={apiKeys.adzuna_apiKey || ''}
+                onChange={(e) => setApiKeys({ ...apiKeys, adzuna_apiKey: e.target.value })}
+                className="input"
+                placeholder="Enter Adzuna API key"
+              />
+            </div>
+
+            <div>
+              <label className="label">Internshala API Key</label>
+              <input
+                type="password"
+                value={apiKeys.internshala || ''}
+                onChange={(e) => setApiKeys({ ...apiKeys, internshala: e.target.value })}
+                className="input"
+                placeholder="Enter Internshala key (or use Apify)"
+              />
+              <p className="text-xs text-gray-500 mt-1">Optional - uses Apify if not provided</p>
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              onClick={saveApiKeys}
+              disabled={apiKeysLoading}
+              className="btn-primary"
+            >
+              {apiKeysLoading ? 'Saving...' : 'Save API Keys'}
+            </button>
+            {apiKeysSaved && (
+              <span className="text-sm text-green-600">API keys saved successfully!</span>
+            )}
           </div>
         </div>
       )}

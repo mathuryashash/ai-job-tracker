@@ -62,6 +62,9 @@ router.post('/upload', upload.single('resume'), async (req: AuthRequest, res: Re
     }
 
     const extractedText = await extractTextFromPDF(req.file.path);
+    if (!extractedText || extractedText.trim().length < 50) {
+      throw createError('Uploaded PDF has no extractable text. Please upload a text-based PDF resume.', 400);
+    }
     const userId = getAuthUserId(req);
     
     if (!userId) {
@@ -89,11 +92,15 @@ router.post('/upload', upload.single('resume'), async (req: AuthRequest, res: Re
     });
   } catch (error) {
     console.error('Upload error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     if (error instanceof z.ZodError) {
       res.status(400).json({ success: false, error: 'Invalid input', details: error.errors });
       return;
     }
+    if (error instanceof Error && (error as any).statusCode) {
+      res.status((error as any).statusCode).json({ success: false, error: error.message });
+      return;
+    }
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ success: false, error: 'Failed to upload resume: ' + errorMessage });
   }
 });

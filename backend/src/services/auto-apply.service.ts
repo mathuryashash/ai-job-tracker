@@ -3,11 +3,7 @@ import { type Job } from './job-scraper.service';
 import { type MatchResult } from './job-matching.service';
 import { type TailoredResume } from './resume-tailoring.service';
 import { ExtractedKeywords } from './keyword-extraction.service';
-import {
-  buildAutomationGraph,
-  buildInitialAutomationState,
-  mapGraphStateToAutomationResult,
-} from './automation.graph';
+import { AutomationService } from './AutomationService';
 
 export interface AutoApplyResult {
   job: Job;
@@ -29,7 +25,7 @@ export interface AutomationConfig {
    useAIKeywords?: boolean;
    resumeId?: string;
    remote?: boolean;
- }
+}
 
 export interface AutomationResult {
   results: AutoApplyResult[];
@@ -38,10 +34,8 @@ export interface AutomationResult {
 }
 
 export async function runAutoApply(config: AutomationConfig): Promise<AutomationResult> {
-  const graphState = buildInitialAutomationState(config);
-  const graph = buildAutomationGraph();
-  const finalState = await graph.invoke(graphState);
-  return mapGraphStateToAutomationResult(finalState);
+  const service = new AutomationService();
+  return service.run(config);
 }
 
 export async function getAutomationStatus(userId: string) {
@@ -66,7 +60,7 @@ export async function getAutomationStatus(userId: string) {
     positionTitle: app.positionTitle,
     status: app.status,
     appliedDate: app.applicationDate,
-    source: app.activities[0]?.description?.includes('via') 
+    source: app.activities[0]?.description?.includes('via')
       ? app.activities[0].description.split('via ')[1]?.split('.')[0] || 'Manual'
       : 'Manual',
     matchScore: (app.activities[0]?.metadata as Record<string, unknown>)?.matchPercentage as number || null,

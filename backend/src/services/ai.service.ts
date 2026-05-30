@@ -51,8 +51,8 @@ export async function analyzeResume(
 
   try {
     const response = await getOpenRouterClient().post('/chat/completions', {
-      model: 'anthropic/claude-3-sonnet',
-      max_tokens: 2000,
+      model: 'google/gemini-2.5-flash',
+      max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -127,8 +127,8 @@ Keep it concise, professional, and tailored to the specific job. Do NOT fabricat
 
   try {
     const response = await getOpenRouterClient().post('/chat/completions', {
-      model: 'anthropic/claude-3-sonnet',
-      max_tokens: 1500,
+      model: 'google/gemini-2.5-flash',
+      max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -181,8 +181,8 @@ Provide your analysis in the following JSON format:
 
   try {
     const response = await getOpenRouterClient().post('/chat/completions', {
-      model: 'anthropic/claude-3-sonnet',
-      max_tokens: 1500,
+      model: 'google/gemini-2.5-flash',
+      max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -250,8 +250,8 @@ Provide a tailored resume in the following JSON format:
 
   try {
     const response = await getOpenRouterClient().post('/chat/completions', {
-      model: 'anthropic/claude-3-sonnet',
-      max_tokens: 3000,
+      model: 'google/gemini-2.5-flash',
+      max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -279,7 +279,7 @@ Provide a tailored resume in the following JSON format:
 
 // ── Shared JSON Parser ──
 
-function parseJsonResponse<T>(response: string, fallback: T): T {
+export function parseJsonResponse<T>(response: string, fallback: T): T {
   try {
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) {

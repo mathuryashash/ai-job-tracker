@@ -29,18 +29,10 @@ export async function initScheduler() {
 
   const intervalMs = getSchedulerIntervalMs();
   schedulerInterval = setInterval(async () => {
-    if (isSchedulerRunning) {
-      console.warn('Scheduler tick skipped: previous run still in progress');
-      return;
-    }
-
-    isSchedulerRunning = true;
     try {
       await runScheduledTasks();
     } catch (error) {
       console.error('Scheduler tick error:', error);
-    } finally {
-      isSchedulerRunning = false;
     }
   }, intervalMs);
   
@@ -94,10 +86,14 @@ export function shouldRunAutomation(automation: Record<string, unknown>, now: Da
 }
 
 export async function runScheduledTasks() {
+  if (isSchedulerRunning) {
+    console.warn('Scheduler tick skipped: previous run still in progress');
+    return;
+  }
+
+  isSchedulerRunning = true;
   try {
     const now = new Date();
-    // TODO: after Auth0 migration, use auth0_sub from DB to identify users
-    // Currently users are looked up by id, but should use auth0Sub for proper identification
     const tasks = await prisma.user.findMany({
       where: {
         preferences: {
@@ -114,7 +110,7 @@ export async function runScheduledTasks() {
       if (!automation?.enabled) continue;
       if (!shouldRunAutomation(automation, now)) continue;
 
-const config: AutomationConfig = {
+      const config: AutomationConfig = {
         userId: user.id,
         keywords: typeof automation.keywords === 'string' ? automation.keywords : undefined,
         location: typeof automation.location === 'string' ? automation.location : undefined,
@@ -167,6 +163,8 @@ const config: AutomationConfig = {
     }
   } catch (error) {
     console.error('Scheduler error:', error);
+  } finally {
+    isSchedulerRunning = false;
   }
 }
 

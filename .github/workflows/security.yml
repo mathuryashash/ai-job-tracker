@@ -1,0 +1,208 @@
+name: Security Gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-audit:
+    name: Dependency Audit (backend + frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Get allowlist
+        id: allowlist
+        run: |
+          if [ -f "security-allowlist.json" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Audit backend dependencies
+        run: |
+          cd backend
+          npm ci --ignore-scripts
+          if [ "${{ steps.allowlist.outputs.exists }}" = "true" ]; then
+            ALLOWLIST_PACKAGES=$(cat ../security-allowlist.json | jq -r '.allowlist[]?.package // empty' 2>/dev/null || echo "")
+            if [ -n "$ALLOWLIST_PACKAGES" ]; then
+              for pkg in $ALLOWLIST_PACKAGES; do
+                npm audit --audit-level=high --package-lock-only --ignore "$pkg" || true
+              done
+            else
+              npm audit --audit-level=high
+            fi
+          else
+            npm audit --audit-level=high
+          fi
+
+      - name: Audit frontend dependencies
+        run: |
+          cd frontend
+          npm ci --ignore-scripts
+          if [ "${{ steps.allowlist.outputs.exists }}" = "true" ]; then
+            ALLOWLIST_PACKAGES=$(cat ../security-allowlist.json | jq -r '.allowlist[]?.package // empty' 2>/dev/null || echo "")
+            if [ -n "$ALLOWLIST_PACKAGES" ]; then
+              for pkg in $ALLOWLIST_PACKAGES; do
+                npm audit --audit-level=high --package-lock-only --ignore "$pkg" || true
+              done
+            else
+              npm audit --audit-level=high
+            fi
+          else
+            npm audit --audit-level=high
+          fi
+
+  secret-scan:
+    name: Secret / Data Leakage Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: detect --source . --verbose --no-git
+        env:
+          GITLEAKS_ENABLE_COMMENTS: false
+          GITLEAKS_CONFIG_PATH: .gitleaks.toml
+
+  prisma-schema-check:
+    name: Prisma Schema Sync Check
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Validate Prisma schema
+        run: |
+          cd backend
+          npm ci --ignore-scripts
+          npx prisma validate
+          npx prisma format --no-color
+          DATABASE_URL="postgresql://testuser:testpass@localhost:5432/testdb" npx prisma generate
+
+      - name: Cleanup services
+        if: always()
+        run: |
+          docker ps -a --filter "ancestor=postgres:15-alpine" --format "{{.ID}}" | xargs -r docker rm -f || true
+          docker ps -a --filter "ancestor=redis:7-alpine" --format "{{.ID}}" | xargs -r docker rm -f || true
+
+  backend-typecheck:
+    name: Backend TypeScript Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd backend
+          npm ci --ignore-scripts
+
+      - name: Generate Prisma Client
+        run: |
+          cd backend
+          npx prisma generate
+
+      - name: Run TypeScript type check
+        run: |
+          cd backend
+          npx tsc --project tsconfig.build.json --noEmit
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+
+  skip-if-docs-only:
+    name: Skip if docs only
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.filter.outputs.non_docs }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            non_docs:
+              - '!**/*.md'
+              - '!**/*.txt'
+              - '!**/*.json'
+              - '!.git/**'
+              - '!.github/**/*.yml'
+              - '!.github/**/*.yaml'

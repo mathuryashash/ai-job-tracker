@@ -17,7 +17,7 @@ The docs describe Auth0/Firebase and Claude direct integration, but the current 
 - Frontend: React 18 + Vite + Tailwind + React Query + DnD + Chart.js/Recharts
 - Backend: Node.js + Express + TypeScript + Prisma + PostgreSQL + BullMQ + Redis
 - AI integration: OpenRouter (`OPENROUTER_API_KEY`) using `anthropic/claude-3-sonnet`
-- Auth in code: custom JWT login flow (email + name), not Auth0/Firebase yet
+- Auth in code: **Auth0 OIDC/JWKS flow** (migrated from demo-only custom JWT)
 - Infra: Docker Compose with PostgreSQL + Redis + backend + frontend
 
 ## 3) Implemented Feature Surface
@@ -29,7 +29,7 @@ The docs describe Auth0/Firebase and Claude direct integration, but the current 
 - Activity timeline CRUD tied to applications
 - Automation module that:
   - Searches multiple job sources/APIs/scrapers
-  - Uses AI keyword extraction from resume
+  - Uses AI keyword extraction from resume (LangGraph)
   - Matches jobs vs resume
   - Creates applications + optional cover letters
 
@@ -37,7 +37,7 @@ The docs describe Auth0/Firebase and Claude direct integration, but the current 
 
 Core models:
 
-- `User` (email, name, preferences JSON)
+- `User` (email, name, auth0Sub, preferences JSON)
 - `Resume` -> `ResumeAnalysis`
 - `JobApplication` -> `Activity`
 - `CoverLetter`
@@ -51,18 +51,21 @@ Important note:
 
 Already improved:
 
-- JWT-based auth middleware in place
+- **Auth0 OIDC/JWKS auth** — real credential-based authentication, no demo-only login
+- Centralized SSRF guard with 10 protection layers (protocol, private IPs, IPv6, DNS rebinding, DoH, domain allowlist, pattern matching, timeout, size limits)
+- JWT-based auth middleware replaced with Auth0 JWKS validation
+- Global SSRF allowlist for all external URL fetches via `safeFetch.ts`
 - Ownership checks added on many routes
 - Zod validation present in many handlers
 - Global error handler covers Zod + Prisma error codes
 - Rate limiting present (auth/general/automation)
+- CI security gates (dependency audit, gitleaks, Prisma schema check, typecheck, build)
+- Integration tests for scheduler overlap, route status codes, auth stale-token, SSRF guard
 
 Still incomplete or inconsistent:
 
-- Route-level `try/catch` often overrides centralized error handling (many responses collapse to 500)
-- Auth context restores token but does not fetch `/api/auth/me` to restore user reliably
-- URL fetch hardening is partial (still needs stricter limits and guardrails)
 - Queue shutdown lifecycle and failure notification path are incomplete
+- Dedup race condition on `(userId, jobUrl)` still needs unique constraint
 
 ## 6) Documentation Drift
 
@@ -75,19 +78,18 @@ The following docs are strong but partially aspirational compared to code:
 
 Drift examples:
 
-- Auth0/Firebase is documented; custom JWT login is implemented.
+- Auth0/Firebase is documented — **now implemented** (was custom JWT before this session).
 - Some endpoint behavior/documented contracts differ from live route code.
 
 ## 7) Known Open Issues (High Signal)
 
 From implementation and issue docs:
 
-1. Dedup race condition when creating applications from scraped jobs.
+1. Dedup race condition when creating applications from scraped jobs (unique constraint not yet added).
 2. Missing robust notification/UX feedback for failed async jobs.
-3. Job description fetch security + timeout + response-size handling needs tightening.
-4. Upload lifecycle lacks per-user quota and cleanup policy.
-5. Missing strict startup env validation and stronger config typing.
-6. Logging correlation can improve (`X-Request-ID` propagation to client + cross-service flow).
+3. Upload lifecycle lacks per-user quota and cleanup policy.
+4. Missing strict startup env validation and stronger config typing.
+5. Logging correlation can improve (`X-Request-ID` propagation to client + cross-service flow).
 
 ## 8) Optimization Opportunities
 
@@ -103,9 +105,7 @@ From implementation and issue docs:
 
 - Replace many `useEffect + axios` calls with React Query `useQuery/useMutation` for cache consistency.
 - Add optimistic updates with rollback hooks for Kanban moves.
-- Use route-level lazy loading (`React.lazy`) for code-splitting.
 - Add error boundaries and actionable error toasts instead of `alert()`.
-- Improve auth restore by calling `/api/auth/me` when token is present.
 
 ### UX/UI
 
@@ -117,40 +117,18 @@ From implementation and issue docs:
 
 ## 9) LangChain / LlamaIndex / LangGraph Fit
 
-Short answer: yes, they can be included.
+LangGraph is already integrated for the automation orchestration pipeline. The graph has 6 nodes:
+`load_user_resume` → `extract_keywords` → `build_search_queries` → `search_jobs` → `dedupe_jobs` → `process_jobs`.
 
-Recommendation by value for this codebase:
-
-1. LangGraph (highest fit)
-   - Best for deterministic multi-step automation flows with retries, branching, and state.
-   - Directly maps to current automation pipeline (search -> match -> tailor -> generate -> persist).
-
-2. LangChain (medium-high fit)
-   - Useful for structured output parsing, prompt templates, tools, and guardrails.
-   - Good incremental upgrade over raw OpenRouter calls.
-
-3. LlamaIndex (situational fit)
-   - Best if you add RAG-heavy features (resume corpus + job corpus retrieval memory).
-   - Less urgent unless retrieval-centric product features are planned.
-
-Pragmatic adoption path:
-
-- Phase 1: Keep current stack, add typed output parsers + validation wrappers.
-- Phase 2: Introduce LangGraph only for automation orchestration path.
-- Phase 3: Add LlamaIndex only if RAG/search memory becomes core product capability.
+LlamaIndex is situational — only needed if RAG-heavy features (resume corpus + job corpus retrieval memory) are added.
 
 ## 10) Memory Update Protocol
 
-This file is the source-of-truth project memory.
-
-After each implementation iteration, update:
-
+This file is the source-of-truth project memory. After each implementation iteration, update with:
 - What changed (files + behavior)
 - New decisions and rationale
 - New risks/bugs discovered
 - What was learned about architecture, UX, or operations
-
-Use the template below for each iteration append.
 
 ## 11) Iteration Log Template
 
@@ -260,3 +238,20 @@ Use the template below for each iteration append.
 - Verification performed: Backend build succeeded; frontend build succeeded; backend automation graph tests passed; changes were committed in three commits.
 - Learnings: Coordinated parallel review plus targeted hardening reduces reliability/security gaps quickly when followed by explicit build and test verification.
 - Next follow-ups: Add regression tests for SSRF guard edge cases and boolean coercion paths, add scheduler concurrency/timing integration tests, and monitor client handling for newly propagated scraper status codes.
+
+### Iteration 2026-04-09 03:15
+
+- Scope: Second parallel hardening batch — real Auth0/OIDC auth, CI security gates, centralized SSRF policy, and integration tests.
+- Files changed:
+  - Created: `backend/src/middleware/auth0.ts`, `backend/src/config/ssrf.config.ts`, `backend/src/utils/ssrf.ts`, `backend/src/utils/safeFetch.ts`, `backend/src/utils/ssrf.test.ts`, `backend/tsconfig.build.json`, `.github/workflows/security.yml`, `security-allowlist.json`, `.gitleaks.toml`, `.gitleaksignore`, `.git/hooks/pre-commit`, `backend/src/__tests__/integration/scheduler.integration.test.ts`, `backend/src/__tests__/integration/routes.status-codes.integration.test.ts`, `backend/src/__tests__/integration/auth.stale-token.integration.test.ts`, `frontend/src/__tests__/AuthContext.integration.test.tsx`
+  - Modified: `backend/src/middleware/auth.ts`, `backend/src/routes/auth.routes.ts`, `backend/prisma/schema.prisma`, `backend/.env.example`, `frontend/.env.example`, `frontend/src/context/AuthContext.tsx`, `frontend/src/pages/Login.tsx`, `frontend/src/App.tsx`, `backend/src/routes/automation.routes.ts`, `backend/src/services/job-scraper.service.ts`, `backend/src/__tests__/unit/ssrf.test.ts`, `backend/package.json`, `backend/jest.config.cjs`, `frontend/package.json`
+- Behavior changes:
+  - **Auth**: Demo-only login replaced with Auth0 OIDC/JWKS flow; `/login` and `/register` endpoints removed; `auth0Sub` field added to User model; frontend now uses `@auth0/auth0-spa-js` PKCE flow; scheduler marked with TODO for post-Auth0 user lookup.
+  - **CI**: 5 parallel security jobs added (dep audit, gitleaks, Prisma schema check, backend typecheck, frontend build); gitleaks pre-commit hook added; `security-allowlist.json` mechanism for documented accepted vulnerabilities.
+  - **SSRF**: Centralized `ssrf.ts` guard with 10 protection layers (protocol, hostname, private IPs, IPv6, DNS rebinding, DoH fallback, domain allowlist, pattern matching, timeout, size limits); `safeFetch.ts` wrapper; all external URL fetches now use centralized guard.
+  - **Integration tests**: 5 test files covering scheduler overlap/cadence, route 4xx status codes, auth stale-token session clearing, SSRF guard blocking, and frontend AuthContext logout flow; MSW for frontend HTTP mocking.
+- Decisions made: Auth0 was chosen because it was already documented and fits the PKCE SPA flow without needing a backend session; CI uses parallel jobs to keep total runtime under 5 min; SSRF guard uses DNS-over-HTTPS fallback to prevent DNS rebinding; integration tests use mocked Prisma/Redis to stay deterministic.
+- Risks introduced: Auth0 migration requires env vars and tenant setup before the app is functional; gitleaks pre-commit requires local installation; SSRF guard DNS checks add latency on every external URL; test mocking may drift from real behavior if dependencies change.
+- Verification performed: Backend `npm run build` passes; frontend `npm run build` passes; SSRF unit tests (47 tests) pass.
+- Learnings: Auth0 PKCE flow eliminates the need for backend session management but requires tenant configuration; centralized SSRF guards are far easier to audit than inline checks scattered across routes; integration tests with mocked deps catch regressions without requiring full Docker infra in every test run.
+- Next follow-ups: Run `npx prisma migrate dev` to apply `auth0Sub` schema change; configure Auth0 tenant with redirect URI; set up GitHub Actions secrets; install gitleaks locally; add E2E tests (Playwright) for auth flow.

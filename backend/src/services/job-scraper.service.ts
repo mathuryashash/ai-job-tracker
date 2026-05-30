@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { ssrfGuard } from '../utils/ssrf';
+import { getCached, setCache, getJobSearchCacheKey, JOB_SEARCH_TTL } from './cache.service';
 
 export interface Job {
   id: string;
@@ -26,38 +28,121 @@ const JOB_DESCRIPTION_MAX_LENGTH = 5000;
 const JOB_DESCRIPTION_FALLBACK_MAX_LENGTH = 3000;
 const SOURCE_TIMEOUT_MS = 15000;
 
-type SourceSearcher = (params: JobSearchParams) => Promise<Job[]>;
+type SourceSearcher = (params: JobSearchParams, userApiKeys?: UserApiKeys) => Promise<Job[]>;
+
+export interface UserApiKeys {
+  apify?: string;
+  jooble?: string;
+  indeed?: string;
+  flexjobs?: string;
+  adzuna?: { appId?: string; apiKey?: string };
+  internshala?: string;
+}
+
+// Source status tracking
+export interface SourceStatus {
+  source: string;
+  status: 'success' | 'failed' | 'no-key' | 'skipped';
+  jobsFound: number;
+  error?: string;
+}
+
+// Merge user API keys with system fallback keys from env
+function getEffectiveApiKeys(userApiKeys?: UserApiKeys): UserApiKeys {
+  const systemKeys: UserApiKeys = {
+    apify: process.env.APIFY_API_KEY,
+    jooble: process.env.JOOBLE_API_KEY,
+    indeed: process.env.INDEED_PUBLISHER_KEY,
+    flexjobs: process.env.FLEXJOBS_API_KEY,
+    adzuna: process.env.ADZUNA_APP_ID && process.env.ADZUNA_API_KEY 
+      ? { appId: process.env.ADZUNA_APP_ID, apiKey: process.env.ADZUNA_API_KEY }
+      : undefined,
+    internshala: process.env.APIFY_API_KEY, // Fallback to Apify for Internshala
+  };
+
+  // If no user keys, use system keys
+  if (!userApiKeys) {
+    return systemKeys;
+  }
+
+  // Merge: user keys take precedence over system keys
+  return {
+    apify: userApiKeys.apify || systemKeys.apify,
+    jooble: userApiKeys.jooble || systemKeys.jooble,
+    indeed: userApiKeys.indeed || systemKeys.indeed,
+    flexjobs: userApiKeys.flexjobs || systemKeys.flexjobs,
+    adzuna: userApiKeys.adzuna || systemKeys.adzuna,
+    internshala: userApiKeys.internshala || systemKeys.internshala,
+  };
+}
 
 // ── Main Search Aggregator ──
 
-export async function searchJobs(params: JobSearchParams): Promise<Job[]> {
-  const sources: SourceSearcher[] = [
-    searchApifyJobs,
-    searchRemotive,
-    searchWeWorkRemotely,
-    searchRemoteOK,
-    searchWellfound,
-    searchRemoteCo,
-    searchFlexJobs,
-    searchJooble,
-    searchIndeed,
-    searchAdzuna,
-    searchGitHubJobs,
+export async function searchJobs(params: JobSearchParams, userApiKeys?: UserApiKeys, userId?: string): Promise<Job[]> {
+  // Use effective keys (user keys + system fallback)
+  const effectiveKeys = getEffectiveApiKeys(userApiKeys);
+
+  // Generate cache key (include API key presence so cache differs when keys change)
+  const hasKeys = Object.values(effectiveKeys).some(v => v && (typeof v === 'string' ? v.length > 0 : Object.values(v || {}).some(x => x)));
+  const userScope = userId ?? 'anonymous';
+  const cacheKey = getJobSearchCacheKey(params.keywords, params.location, params.remote) + `:${userScope}` + (hasKeys ? ':with-keys' : ':no-keys');
+
+  // Check cache first (only if no keys - don't cache when user has keys)
+  if (!hasKeys) {
+    const cachedJobs = await getCached<Job[]>(cacheKey);
+    if (cachedJobs && cachedJobs.length > 0) {
+      console.log(`Returning cached results for ${cacheKey}`);
+      return cachedJobs;
+    }
+  }
+
+  // Track source status for feedback
+  const sourceStatuses: SourceStatus[] = [];
+
+  // No cache - fetch from all sources
+  const sources: { fn: SourceSearcher; name: string; requiresKey: boolean }[] = [
+    { fn: (p) => searchApifyJobs(p, userApiKeys), name: 'LinkedIn (Apify)', requiresKey: true },
+    { fn: searchRemotive, name: 'Remotive', requiresKey: false },
+    { fn: searchWeWorkRemotely, name: 'We Work Remotely', requiresKey: false },
+    { fn: searchRemoteOK, name: 'Remote OK', requiresKey: false },
+    { fn: searchWellfound, name: 'Wellfound', requiresKey: false },
+    { fn: searchRemoteCo, name: 'Remote.co', requiresKey: false },
+    { fn: (p) => searchFlexJobs(p, userApiKeys), name: 'FlexJobs', requiresKey: true },
+    { fn: (p) => searchJooble(p, userApiKeys), name: 'Jooble', requiresKey: true },
+    { fn: (p) => searchIndeed(p, userApiKeys), name: 'Indeed API', requiresKey: true },
+    { fn: (p) => searchAdzuna(p, userApiKeys), name: 'Adzuna', requiresKey: true },
+    { fn: searchGitHubJobs, name: 'Arbeitnow', requiresKey: false },
+    { fn: (p) => searchInternshala(p, userApiKeys), name: 'Internshala', requiresKey: true },
   ];
 
   const results = await runWithConcurrencyLimit(
-    sources,
+    sources.map(s => s.fn),
     SOURCE_CONCURRENCY_LIMIT,
-    (fn) => fn(params),
+    (fn) => fn(params, effectiveKeys),
     SOURCE_TIMEOUT_MS
   );
 
   const jobs: Job[] = [];
-  for (const result of results) {
+  for (let i = 0; i < results.length; i++) {
+    const sourceInfo = sources[i];
+    const result = results[i];
     if (result.status === 'fulfilled') {
-      jobs.push(...result.value);
+      const foundJobs = result.value;
+      jobs.push(...foundJobs);
+      sourceStatuses.push({
+        source: sourceInfo.name,
+        status: foundJobs.length > 0 ? 'success' : 'skipped',
+        jobsFound: foundJobs.length,
+      });
     } else {
-      console.error('Job source failed:', result.reason?.message || result.reason);
+      const errorMsg = (result.reason as any)?.message || String(result.reason);
+      sourceStatuses.push({
+        source: sourceInfo.name,
+        status: sourceInfo.requiresKey && !hasKeys ? 'no-key' : 'failed',
+        jobsFound: 0,
+        error: errorMsg,
+      });
+      console.error(`Job source ${sourceInfo.name} failed:`, errorMsg);
     }
   }
 
@@ -70,6 +155,17 @@ export async function searchJobs(params: JobSearchParams): Promise<Job[]> {
       job.location.toLowerCase() === 'anywhere' ||
       job.location.toLowerCase() === 'worldwide'
     );
+  }
+
+  // Log source status for debugging
+  console.log('[Job Search] Source statuses:', sourceStatuses.map(s => 
+    `${s.source}: ${s.status} (${s.jobsFound} jobs)${s.error ? ` - ${s.error}` : ''}`
+  ).join(', '));
+
+  // Cache the results (only if no user keys)
+  if (!hasKeys && filteredJobs.length > 0) {
+    await setCache(cacheKey, filteredJobs, JOB_SEARCH_TTL);
+    console.log(`Cached ${filteredJobs.length} jobs for ${cacheKey}`);
   }
 
   return filteredJobs;
@@ -111,8 +207,9 @@ async function runWithConcurrencyLimit<TItem, TResult>(
 
 // ── Apify Job Scraping ──
 
-async function searchApifyJobs(params: JobSearchParams): Promise<Job[]> {
-  const apiKey = process.env.APIFY_API_KEY;
+async function searchApifyJobs(params: JobSearchParams, userApiKeys?: UserApiKeys): Promise<Job[]> {
+  // Use user-provided API key first, fallback to system env
+  const apiKey = userApiKeys?.apify || process.env.APIFY_API_KEY;
   if (!apiKey) return [];
 
   try {
@@ -364,8 +461,8 @@ async function searchRemoteCo(params: JobSearchParams): Promise<Job[]> {
 
 // ── FlexJobs ──
 
-async function searchFlexJobs(params: JobSearchParams): Promise<Job[]> {
-  const apiKey = process.env.FLEXJOBS_API_KEY;
+async function searchFlexJobs(params: JobSearchParams, userApiKeys?: UserApiKeys): Promise<Job[]> {
+  const apiKey = userApiKeys?.flexjobs || process.env.FLEXJOBS_API_KEY;
   if (!apiKey) return [];
 
   try {
@@ -399,8 +496,8 @@ async function searchFlexJobs(params: JobSearchParams): Promise<Job[]> {
 
 // ── Jooble ──
 
-async function searchJooble(params: JobSearchParams): Promise<Job[]> {
-  const apiKey = process.env.JOOBLE_API_KEY;
+async function searchJooble(params: JobSearchParams, userApiKeys?: UserApiKeys): Promise<Job[]> {
+  const apiKey = userApiKeys?.jooble || process.env.JOOBLE_API_KEY;
   if (!apiKey) return [];
 
   try {
@@ -433,8 +530,8 @@ async function searchJooble(params: JobSearchParams): Promise<Job[]> {
 
 // ── Indeed (Publisher API) ──
 
-async function searchIndeed(params: JobSearchParams): Promise<Job[]> {
-  const publisherKey = process.env.INDEED_PUBLISHER_KEY;
+async function searchIndeed(params: JobSearchParams, userApiKeys?: UserApiKeys): Promise<Job[]> {
+  const publisherKey = userApiKeys?.indeed || process.env.INDEED_PUBLISHER_KEY;
   if (!publisherKey) return [];
 
   try {
@@ -475,9 +572,10 @@ async function searchIndeed(params: JobSearchParams): Promise<Job[]> {
 
 // ── Adzuna ──
 
-async function searchAdzuna(params: JobSearchParams): Promise<Job[]> {
-  const appId = process.env.ADZUNA_APP_ID;
-  const apiKey = process.env.ADZUNA_API_KEY;
+async function searchAdzuna(params: JobSearchParams, userApiKeys?: UserApiKeys): Promise<Job[]> {
+  const userAdzuna = userApiKeys?.adzuna;
+  const appId = userAdzuna?.appId || process.env.ADZUNA_APP_ID;
+  const apiKey = userAdzuna?.apiKey || process.env.ADZUNA_API_KEY;
   if (!appId || !apiKey) return [];
 
   try {
@@ -540,6 +638,13 @@ function stripHtmlTags(html: string): string {
 }
 
 export async function getJobDescription(url: string): Promise<string> {
+  try {
+    await ssrfGuard(url);
+  } catch (guardError) {
+    console.error(`SSRF protection blocked getJobDescription for ${url}:`, guardError);
+    return '';
+  }
+
   const commonHeaders = {
     'User-Agent': 'AI-Resume-Tracker/1.0 (+https://example.com/contact)',
     Accept: 'text/html,application/xhtml+xml',
@@ -547,9 +652,10 @@ export async function getJobDescription(url: string): Promise<string> {
 
   try {
     const response = await axios.get(url, {
-      timeout: 6000,
+      timeout: 5000, // 5 second timeout
       headers: commonHeaders,
       maxRedirects: 3,
+      maxContentLength: 50 * 1024, // 50KB max response size
     });
 
     const html = response.data;
@@ -572,8 +678,12 @@ export async function getJobDescription(url: string): Promise<string> {
     return '';
   } catch (error: any) {
     const message = error?.message || String(error);
-    if (error?.code === 'ECONNABORTED' || error?.response?.status === 429) {
-      console.error(`Timeout/rate-limit fetching JD from ${url}:`, message);
+    if (error?.code === 'ECONNABORTED') {
+      console.error(`Timeout fetching JD from ${url}:`, message);
+    } else if (error?.code === 'ERR_STREAM_CONTENT_LENGTH_AFTER_CLOSE' || error?.message?.includes('maxContentLength')) {
+      console.error(`Response too large from ${url}:`, message);
+    } else if (error?.response?.status === 429) {
+      console.error(`Rate limit exceeded fetching JD from ${url}:`, message);
     } else {
       console.error(`Error fetching JD from ${url}:`, message);
     }
@@ -619,4 +729,107 @@ function extractMetaDescription(html: string): string | null {
   }
 
   return null;
+}
+
+// ── Internshala via Apify ──
+
+async function searchInternshala(params: JobSearchParams, userApiKeys?: UserApiKeys): Promise<Job[]> {
+  const apiKey = userApiKeys?.internshala || userApiKeys?.apify || process.env.APIFY_API_KEY;
+  if (!apiKey) return [];
+
+  try {
+    // Use Apify to scrape Internshala jobs
+    // There's a community actor for Internshala or we can create a custom one
+    const response = await axios.post(
+      'https://api.apify.com/v2/acts/apify~internship-scraper/runs',
+      {
+        input: {
+          searchQueries: params.keywords ? [params.keywords] : ['software'],
+          location: params.location || 'India',
+          maxResults: 20,
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
+      }
+    );
+
+    const runId = response.data.id;
+    
+    // Wait for completion
+    let status = 'RUNNING';
+    let waitAttempts = 0;
+    while (status === 'RUNNING' && waitAttempts < APIFY_RUN_STATUS_MAX_ATTEMPTS) {
+      await new Promise(resolve => setTimeout(resolve, APIFY_RUN_STATUS_POLL_INTERVAL_MS));
+      const statusCheck = await axios.get(
+        `https://api.apify.com/v2/acts/apify~internship-scraper/runs/${runId}`,
+        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+      );
+      status = statusCheck.data.data.status;
+      waitAttempts++;
+    }
+
+    // Get results
+    const datasetResponse = await axios.get(
+      `https://api.apify.com/v2/acts/apify~internship-scraper/runs/${runId}/dataset/items`,
+      {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        timeout: 15000,
+      }
+    );
+
+    return (datasetResponse.data || []).map((job: any) => ({
+      id: `internshala-${job.id || Date.now()}`,
+      title: job.title || '',
+      company: job.company || 'Unknown',
+      location: job.location || 'India',
+      description: job.description || '',
+      url: job.url || '',
+      salary: job.stipend || undefined,
+      postedDate: job.postedDate || undefined,
+      source: 'Internshala (Apify)',
+    }));
+  } catch (error: any) {
+    console.error('Internshala (Apify) error:', error.message);
+  }
+
+  // Fallback: Try general web scraping for Internshala
+  try {
+    const searchQuery = encodeURIComponent(params.keywords || 'software developer');
+    const response = await axios.get(
+      `https://internshala.com/search/jobs?search=${searchQuery}`,
+      { timeout: 15000 }
+    );
+
+    // Parse HTML to extract job listings
+    const html = response.data;
+    const jobMatches = html.match(/<div class="individual-job-id-[\d]+"[^>]*>[\s\S]*?<\/div>/g) || [];
+    
+    return jobMatches.slice(0, 10).map((jobHtml: string, i: number) => {
+      const titleMatch = jobHtml.match(/<h3[^>]*>([^<]+)<\/h3>/);
+      const companyMatch = jobHtml.match(/<a[^>]*company-name[^>]*>([^<]+)<\/a>/);
+      const locationMatch = jobHtml.match(/<span[^>]*location[^>]*>([^<]+)<\/span>/);
+      const linkMatch = jobHtml.match(/href="([^"]+)"/);
+      
+      return {
+        id: `internshala-web-${i}-${Date.now()}`,
+        title: titleMatch?.[1]?.trim() || '',
+        company: companyMatch?.[1]?.trim() || 'Unknown',
+        location: locationMatch?.[1]?.trim() || 'India',
+        description: '',
+        url: linkMatch?.[1] ? `https://internshala.com${linkMatch[1]}` : '',
+        salary: undefined,
+        postedDate: undefined,
+        source: 'Internshala',
+      };
+    });
+  } catch (error: any) {
+    console.error('Internshala fallback error:', error.message);
+  }
+
+  return [];
 }

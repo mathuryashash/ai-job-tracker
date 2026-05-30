@@ -25,8 +25,8 @@ export async function tailorResume(
     const response = await getOpenRouterClient().post(
       '/chat/completions',
       {
-        model: 'anthropic/claude-3-sonnet',
-        max_tokens: 3000,
+        model: 'google/gemini-2.5-flash',
+        max_tokens: 1000,
         messages: [
           {
             role: 'user',
@@ -135,7 +135,7 @@ Provide as a JSON array of strings:
     const response = await getOpenRouterClient().post(
       '/chat/completions',
       {
-        model: 'anthropic/claude-3-sonnet',
+        model: 'google/gemini-2.5-flash',
         max_tokens: 1000,
         messages: [{ role: 'user', content: prompt }],
       }
@@ -155,7 +155,9 @@ Provide as a JSON array of strings:
   return [];
 }
 
-function createCacheKey(namespace: string, prompt: string): string {
-  const fingerprint = crypto.createHash('sha256').update(prompt).digest('hex');
-  return `resume:${namespace}:${fingerprint}`;
+function createCacheKey(namespace: string, prompt: string, userId?: string, jobId?: string): string {
+   const fingerprint = crypto.createHash('sha256').update(prompt).digest('hex');
+   const userPart = userId ? `:user:${userId}` : '';
+   const jobPart = jobId ? `:job:${jobId}` : '';
+   return `resume:${namespace}${userPart}${jobPart}:${fingerprint}`;
 }

@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import { analyzeResume, generateCoverLetter } from '../services/ai.service';
 import prisma from '../prisma/index';
+import { NotificationService } from '../services/notification.service';
 
 const connection = new IORedis({
   host: process.env.REDIS_HOST || 'localhost',
@@ -11,6 +12,7 @@ const connection = new IORedis({
 
 export const resumeAnalysisQueue = new Queue('resume-analysis', { connection });
 export const coverLetterQueue = new Queue('cover-letter-generation', { connection });
+export const automationQueue = new Queue('automation', { connection });
 
 let analysisWorker: Worker | null = null;
 let coverLetterWorker: Worker | null = null;
@@ -22,6 +24,15 @@ export async function initQueues() {
     const { resumeId, userId, jobDescription } = job.data;
     console.log(`[Worker] Analyzing resume ${resumeId}`);
 
+    // Find the existing "processing" analysis for this resume
+    const existingAnalysis = await prisma.resumeAnalysis.findFirst({
+      where: {
+        resumeId,
+        status: 'processing',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
     const resume = await prisma.resume.findUnique({ where: { id: resumeId } });
     if (!resume?.extractedText) {
       throw new Error(`Resume ${resumeId} not found or has no extracted text`);
@@ -29,17 +40,32 @@ export async function initQueues() {
 
     const result = await analyzeResume(resume.extractedText, jobDescription);
 
-    await prisma.resumeAnalysis.create({
-      data: {
-        resumeId,
-        jobDescription,
-        matchPercentage: result.matchPercentage,
-        skillsRadar: result.skillsRadar,
-        missingKeywords: result.missingKeywords,
-        suggestions: result.suggestions,
-        status: 'completed',
-      },
-    });
+    if (existingAnalysis) {
+      // Update existing analysis
+      await prisma.resumeAnalysis.update({
+        where: { id: existingAnalysis.id },
+        data: {
+          matchPercentage: result.matchPercentage,
+          skillsRadar: result.skillsRadar,
+          missingKeywords: result.missingKeywords,
+          suggestions: result.suggestions,
+          status: 'completed',
+        },
+      });
+    } else {
+      // Fallback: create new if no existing
+      await prisma.resumeAnalysis.create({
+        data: {
+          resumeId,
+          jobDescription,
+          matchPercentage: result.matchPercentage,
+          skillsRadar: result.skillsRadar,
+          missingKeywords: result.missingKeywords,
+          suggestions: result.suggestions,
+          status: 'completed',
+        },
+      });
+    }
 
     return { success: true, matchPercentage: result.matchPercentage };
   }, {
@@ -94,9 +120,13 @@ export async function initQueues() {
     console.log(`Job ${job.id} completed`);
   });
 
-  analysisWorker.on('failed', (job, err) => {
-    console.error(`Job ${job?.id} failed:`, err.message);
-  });
+   analysisWorker.on('failed', (job, err) => {
+      console.error(`Job ${job?.id || 'unknown'} failed:`, err.message);
+      // Notify user of failed job
+      if (job) {
+        NotificationService.handleFailedJob(job, err);
+      }
+    });
 
   coverLetterWorker.on('failed', (job, err) => {
     console.error(`Cover letter job ${job?.id} failed:`, err.message);

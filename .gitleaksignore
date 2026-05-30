@@ -1,0 +1,26 @@
+# GitLeaks ignore file - patterns for known false positives
+# Add paths here that should be skipped during scanning
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# Environment files (should never be committed anyway)
+.env
+.env.local
+.env.*.local

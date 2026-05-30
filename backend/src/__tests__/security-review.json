@@ -1,0 +1,95 @@
+{
+  "reviewer": "security",
+  "findings": [
+    {
+      "title": "Missing Input Length Limits on Cover Letter jobDescription",
+      "file": "backend/src/routes/coverLetter.routes.ts",
+      "line": 14,
+      "severity": "medium",
+      "description": "The jobDescription field in generateSchema is defined as z.string() without any max length validation. This allows clients to send arbitrarily large strings that could cause memory exhaustion or DoS.",
+      "attack_scenario": "An attacker sends a cover letter generation request with a multi-MB jobDescription field, causing the server to allocate excessive memory or timeout while processing.",
+      "recommendation": "Add max length validation: jobDescription: z.string().max(50000)"
+    },
+    {
+      "title": "PDF Content Validation Missing Magic Bytes Check",
+      "file": "backend/src/services/resume.service.ts",
+      "line": 19,
+      "severity": "medium",
+      "description": "validatePDF() only checks the mimetype from multer, which can be easily spoofed. The actual file content is not validated for PDF magic bytes (%PDF).",
+      "attack_scenario": "An attacker uploads a malicious file with PDF extension and manipulated Content-Type header. The file is accepted even if not a valid PDF, potentially causing issues when pdf-parse processes it.",
+      "recommendation": "Add magic bytes validation: const buffer = Buffer.allocfers(5); fs.readSync(fd, buffer, 0, 5, 0); if (buffer.toString() !== '%PDF') return { valid: false }"
+    },
+    {
+      "title": "Prompt Injection Risk in Resume Parsing",
+      "file": "backend/src/services/resume-parser.service.ts",
+      "line": 65,
+      "severity": "high",
+      "description": "User-provided extractedText from resumes is directly interpolated into the AI prompt without sanitization. Malicious resume content could manipulate the AI response.",
+      "attack_scenario": "A user creates a resume with specially crafted content designed to make the AI ignore its instructions or output attacker-controlled data. The prompt includes: 'IMPORTANT: Only extract information that is clearly present in the resume. Do not guess or invent details. RESUME TEXT: {user-controlled}'",
+      "recommendation": "Implement prompt injection defenses: (1) Use system message framing, (2) Add content boundaries markers, (3) Sanitize/rescape control characters from extractedText before embedding in prompt"
+    },
+    {
+      "title": "Unvalidated Input Passed to Queue Jobs",
+      "file": "backend/src/routes/resume.routes.ts",
+      "line": 105,
+      "severity": "medium",
+      "description": "The jobDescription parameter in /:id/analyze is passed directly to the queue without validation. While it is optional (z.string().optional()), no length limit is enforced.",
+      "attack_scenario": "Large jobDescription values could be stored in the database or passed to background workers, causing resource exhaustion.",
+      "recommendation": "Add schema validation: jobDescription: z.string().max(50000).optional()"
+    },
+    {
+      "title": "Missing JSON Payload Size Limit on Generic Endpoints",
+      "file": "backend/src/index.ts",
+      "line": "N/A",
+      "severity": "medium",
+      "description": "Express.json() middleware is used without an explicit 'limit' option, defaulting to 100KB. Large JSON payloads could bypass this on unguarded endpoints.",
+      "attack_scenario": "An attacker sends a massive JSON body to overwhelm the server parsing resources.",
+      "recommendation": "Add explicit limit: app.use(express.json({ limit: '500kb' }))"
+    },
+    {
+      "title": "API Key Storage Uses ECB Mode Encryption",
+      "file": "backend/src/utils/crypto.ts",
+      "line": "N/A",
+      "severity": "medium",
+      "description": "API keys are encrypted before storage. Need to verify encryption implementation does not use weak modes like ECB.",
+      "attack_scenario": "Weak encryption could be broken, exposing user API keys stored in the database.",
+      "recommendation": "Use AES-GCM or AES-CTR with random IVs. Avoid ECB mode entirely."
+    }
+  ],
+  "residual_risks": [
+    {
+      "category": "Input Validation",
+      "description": "Several endpoints accept user input without strict allowlisting. The application relies on Zod for validation but some fields lack max length enforcement."
+    },
+    {
+      "category": "AI/LLM Integration",
+      "description": "Resume parsing and job matching use external AI services. Prompt injection and response manipulation risks exist but are partially mitigated by default fallbacks."
+    },
+    {
+      "category": "File Upload",
+      "description": "PDF validation checks mimetype but not content. Magic bytes validation would strengthen security."
+    },
+    {
+      "category": "Rate Limiting",
+      "description": "Rate limiters are configured but could be bypassed with distributed requests. Consider IP-based fail2ban for production."
+    }
+  ],
+  "testing_gaps": [
+    {
+      "gap": "Fuzz testing with malformed PDF files",
+      "description": "Test pdf-parse library behavior with malicious PDF payloads, password-protected PDFs, and corrupt files"
+    },
+    {
+      "gap": "Prompt injection fuzzing",
+      "description": "Test resume parsing with various prompt injection patterns in resume text"
+    },
+    {
+      "gap": "Large payload DoS testing",
+      "description": "Send max-size payloads to all endpoints to verify timeout and memory behavior"
+    },
+    {
+      "gap": "SSRF regression testing",
+      "description": "Test SSRF guard with new URL patterns, DNS rebinding attempts, and IPv6 variants"
+    }
+  ]
+}

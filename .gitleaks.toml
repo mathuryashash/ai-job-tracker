@@ -1,0 +1,19 @@
+[toml]
+version = "v8"
+
+[allowlist]
+  description = "Allowlist for known false positives"
+  file = ".gitleaksignore"
+
+# Gitleaks ignore patterns for known false positives
+[[rules]]
+  id = "package-lock-json"
+  description = "Skip package-lock.json files"
+  ignore = true
+  files = ["""package-lock\.json"""]
+
+[[rules]]
+  id = "node-modules"
+  description = "Skip node_modules directories"
+  ignore = true
+  files = ["""node_modules/"""]

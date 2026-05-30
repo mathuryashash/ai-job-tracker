@@ -3,18 +3,23 @@ import axios from 'axios';
 
 interface User {
   id: string;
-  email: string;
-  name: string;
-  picture?: string;
+  email?: string;
+  name?: string;
+  picture?: string | null;
 }
 
 interface AuthContextType {
   user: User | null;
-  loading: boolean;
   token: string | null;
-  login: (email: string, name: string, picture?: string) => Promise<void>;
+  loading: boolean;
+  isAuthenticated: boolean;
+  login: (email: string, name: string) => Promise<void>;
   logout: () => void;
+  loginWithRedirect: () => Promise<void>;
+  getAccessToken: () => Promise<string | undefined>;
 }
+
+const TOKEN_KEY = 'authToken';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -24,70 +29,80 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const clearSession = () => {
-      sessionStorage.removeItem('authToken');
-      setToken(null);
-      setUser(null);
-      delete axios.defaults.headers.common['Authorization'];
-    };
-
-    const restoreSession = async () => {
-      const savedToken = sessionStorage.getItem('authToken');
-      if (!savedToken) {
-        setLoading(false);
-        return;
-      }
-
-      setToken(savedToken);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
-
-      try {
-        const response = await axios.get('/api/auth/me');
-        if (response.data?.success && response.data?.data) {
-          setUser(response.data.data as User);
-          setLoading(false);
-          return;
-        }
-
-        clearSession();
-      } catch (_error) {
-        clearSession();
-      }
-
+    const savedToken = sessionStorage.getItem(TOKEN_KEY);
+    if (!savedToken) {
       setLoading(false);
-    };
+      return;
+    }
 
-    restoreSession();
+    axios
+      .get('/api/auth/me', {
+        headers: { Authorization: `Bearer ${savedToken}` },
+      })
+      .then((res) => {
+        if (res.data?.success) {
+          setUser(res.data.data);
+          setToken(savedToken);
+          axios.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
+        } else {
+          sessionStorage.removeItem(TOKEN_KEY);
+        }
+      })
+      .catch(() => {
+        sessionStorage.removeItem(TOKEN_KEY);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email: string, name: string, picture?: string) => {
-    try {
-      const response = await axios.post('/api/auth/login', { email, name, picture });
-      const { user: userData, token: authToken } = response.data.data;
-      
-      setUser(userData);
-      setToken(authToken);
-      
-      // Store token in sessionStorage (cleared on browser close)
-      sessionStorage.setItem('authToken', authToken);
-      
-      // Set default authorization header for future requests
-      axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-    } catch (error) {
-      console.error('Login failed:', error);
-      throw error;
-    }
+  useEffect(() => {
+    const interceptorId = axios.interceptors.response.use(
+      (res) => res,
+      (error) => {
+        if (error.response?.status === 401 && token) {
+          sessionStorage.removeItem(TOKEN_KEY);
+          setUser(null);
+          setToken(null);
+          delete axios.defaults.headers.common['Authorization'];
+        }
+        return Promise.reject(error);
+      }
+    );
+    return () => axios.interceptors.response.eject(interceptorId);
+  }, [token]);
+
+  const login = async (email: string, name: string) => {
+    const res = await axios.post('/api/auth/dev-login', { email, name });
+    const { user: loggedInUser, token: newToken } = res.data.data;
+    sessionStorage.setItem(TOKEN_KEY, newToken);
+    setUser(loggedInUser);
+    setToken(newToken);
+    axios.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
   };
 
   const logout = () => {
+    sessionStorage.removeItem(TOKEN_KEY);
     setUser(null);
     setToken(null);
-    sessionStorage.removeItem('authToken');
     delete axios.defaults.headers.common['Authorization'];
   };
 
+  const loginWithRedirect = async () => {};
+
+  const getAccessToken = async () => token || undefined;
+
   return (
-    <AuthContext.Provider value={{ user, loading, token, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        loading,
+        isAuthenticated: !!user,
+        login,
+        logout,
+        loginWithRedirect,
+        getAccessToken,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

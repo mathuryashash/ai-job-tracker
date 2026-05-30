@@ -54,7 +54,7 @@ Rules for suggestedTitles:
 
   try {
     const response = await getOpenRouterClient().post('/chat/completions', {
-      model: 'anthropic/claude-3-sonnet',
+      model: 'google/gemini-2.5-flash',
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }],
     });

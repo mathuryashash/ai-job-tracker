@@ -22,6 +22,8 @@ const columns = [
 export default function JobTracker() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [showModal, setShowModal] = useState(false);
   const [newApp, setNewApp] = useState({
     companyName: '',
@@ -57,16 +59,24 @@ export default function JobTracker() {
       )
     );
 
+    setSavingIds((prev) => new Set(prev).add(draggableId));
     try {
       await axios.post(`/api/applications/${draggableId}/move`, { status: newStatus });
     } catch (error) {
       console.error('Failed to update status:', error);
       fetchApplications();
+    } finally {
+      setSavingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(draggableId);
+        return next;
+      });
     }
   };
 
   const handleCreateApplication = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitting(true);
     try {
       await axios.post('/api/applications', {
         companyName: newApp.companyName,
@@ -78,12 +88,14 @@ export default function JobTracker() {
       fetchApplications();
     } catch (error) {
       console.error('Failed to create application:', error);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this application?')) return;
-    
+
     try {
       await axios.delete(`/api/applications/${id}`);
       fetchApplications();
@@ -139,24 +151,32 @@ export default function JobTracker() {
                               {...provided.dragHandleProps}
                               className={`bg-white rounded-lg shadow-sm p-4 mb-3 cursor-grab hover:shadow-md transition-shadow ${
                                 snapshot.isDragging ? 'opacity-50' : ''
-                              }`}
+                              } ${savingIds.has(app.id) ? 'ring-2 ring-primary-300 ring-offset-1' : ''}`}
                             >
                               <div className="flex justify-between items-start">
-                                <div>
-                                  <p className="font-medium text-gray-900">
+                                <div className="flex-1 min-w-0 mr-2">
+                                  <p className="font-medium text-gray-900 truncate">
                                     {app.positionTitle}
                                   </p>
-                                  <p className="text-sm text-gray-600">
+                                  <p className="text-sm text-gray-600 truncate">
                                     {app.companyName}
                                   </p>
                                 </div>
-                                <button
-                                  onClick={() => handleDelete(app.id)}
-                                  className="text-gray-400 hover:text-red-500 w-7 h-7 rounded-full hover:bg-red-50"
-                                  aria-label={`Delete ${app.positionTitle} at ${app.companyName}`}
-                                >
-                                  ×
-                                </button>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  {savingIds.has(app.id) && (
+                                    <div
+                                      className="w-3 h-3 border border-primary-500 border-t-transparent rounded-full animate-spin"
+                                      aria-label="Saving…"
+                                    />
+                                  )}
+                                  <button
+                                    onClick={() => handleDelete(app.id)}
+                                    className="text-gray-400 hover:text-red-500 w-7 h-7 rounded-full hover:bg-red-50 flex items-center justify-center"
+                                    aria-label={`Delete ${app.positionTitle} at ${app.companyName}`}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
                               </div>
                               {app.jobUrl && (
                                 <a
@@ -199,6 +219,7 @@ export default function JobTracker() {
                   }
                   className="input"
                   required
+                  disabled={submitting}
                 />
               </div>
               <div className="mb-4">
@@ -211,6 +232,7 @@ export default function JobTracker() {
                   }
                   className="input"
                   required
+                  disabled={submitting}
                 />
               </div>
               <div className="mb-4">
@@ -222,6 +244,7 @@ export default function JobTracker() {
                     setNewApp({ ...newApp, jobUrl: e.target.value })
                   }
                   className="input"
+                  disabled={submitting}
                 />
               </div>
               <div className="flex justify-end space-x-3">
@@ -229,11 +252,19 @@ export default function JobTracker() {
                   type="button"
                   onClick={() => setShowModal(false)}
                   className="btn-secondary"
+                  disabled={submitting}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary">
-                  Create
+                <button
+                  type="submit"
+                  className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={submitting}
+                >
+                  {submitting && (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  {submitting ? 'Creating…' : 'Create'}
                 </button>
               </div>
             </form>

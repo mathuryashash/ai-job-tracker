@@ -1,6 +1,49 @@
 node_modules/
 .env
+.env.local
+.env.*.local
+backend/.env
+backend/.env.local
+frontend/.env
+frontend/.env.local
 dist/
 build/
 .DS_Store
 *.log
+security-allowlist.json
+
+# Agent directories
+.agents/
+.antigravitycli/
+.claude-flow/
+.claude/
+.codex/
+.planning/
+.playwright-mcp/
+.swarm/
+.vscode/
+
+# Local databases
+*.db
+
+# Temporary/test upload directories
+backend/uploads/
+
+# Special device/temp files
+nul
+backend/nul
+0
+
+# Local design/fix notes and PDFs
+CODEBASE_AUDIT.md
+FIX.md
+FIXES_APPLIED.md
+FIX_VERIFICATION.md
+PLAN.md
+login-full.png
+login-page.png
+login-redesign.png
+login-snapshot.md
+ruflodashboard.html
+test-keywords.js
+YashashMathur_Updated.pdf
