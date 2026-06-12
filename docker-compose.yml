@@ -1,11 +1,11 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:16-pgvector
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ai_resume_tracker
+      POSTGRES_DB: resume_tracker
     ports:
       - "5433:5432"
     volumes:
@@ -16,64 +16,36 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7
-    restart: always
-    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
-    ports:
-      - "6380:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   backend:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
     ports:
-      - "3001:3001"
+      - "8000:8000"
     restart: always
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_resume_tracker
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - PORT=3001
-      - FRONTEND_URL=http://localhost:5173
-      - NODE_ENV=${NODE_ENV:-development}
-      - EXPOSE_ERROR_STACKS=${EXPOSE_ERROR_STACKS:-false}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - JOOBLE_API_KEY=${JOOBLE_API_KEY}
-      - ADZUNA_APP_ID=${ADZUNA_APP_ID}
-      - ADZUNA_API_KEY=${ADZUNA_API_KEY}
-      - APIFY_API_KEY=${APIFY_API_KEY}
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/resume_tracker
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - BACKEND_HOST=0.0.0.0
+      - BACKEND_PORT=8000
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - ./backend/uploads:/app/uploads
-      - /app/node_modules
-    command: sh -c "mkdir -p /app/uploads && npx prisma migrate deploy && npm run dev"
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
-    image: node:20-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: always
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    working_dir: /app
-    command: sh -c "npm install && npm run dev"
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    command: streamlit run src/app.py --server.port=8501 --server.address=0.0.0.0
     depends_on:
       - backend
 
 volumes:
   postgres_data:
-  redis_data:

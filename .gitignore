@@ -26,6 +26,16 @@ security-allowlist.json
 # Local databases
 *.db
 
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+temp_uploads/
+
+# Machine-specific local config
+wsl_ip.txt
+
 # Temporary/test upload directories
 backend/uploads/
 
