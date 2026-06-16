@@ -56,9 +56,9 @@ async def health_check():
         "db_url": db.DATABASE_URL,
         "groq_model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
         "keys_configured": {
-            "groq": bool(os.getenv("GROQ_API_KEY")),
-            "apify": bool(os.getenv("APIFY_TOKEN")),
-            "tinyfish": bool(os.getenv("TINYFISH_API_KEY")),
+            "groq": bool(db.get_config("groq_api_key") or os.getenv("GROQ_API_KEY")),
+            "apify": bool(db.get_config("apify_token") or os.getenv("APIFY_TOKEN")),
+            "tinyfish": bool(db.get_config("tinyfish_api_key") or os.getenv("TINYFISH_API_KEY")),
         }
     }
 
@@ -139,6 +139,38 @@ class ApplicationCreate(BaseModel):
 class ApplicationUpdateStatus(BaseModel):
     status: str
 
+class KeysPayload(BaseModel):
+    groq_api_key: Optional[str] = None
+    apify_token: Optional[str] = None
+    tinyfish_api_key: Optional[str] = None
+
+@app.post("/api/keys")
+async def save_keys(payload: KeysPayload):
+    if payload.groq_api_key:
+        db.save_config("groq_api_key", payload.groq_api_key)
+    if payload.apify_token:
+        db.save_config("apify_token", payload.apify_token)
+    if payload.tinyfish_api_key:
+        db.save_config("tinyfish_api_key", payload.tinyfish_api_key)
+    return {"saved": True}
+
+@app.get("/api/keys")
+async def get_keys():
+    groq = db.get_config("groq_api_key")
+    apify = db.get_config("apify_token")
+    tinyfish = db.get_config("tinyfish_api_key")
+    def mask(v): return f"...{v[-4:]}" if v and len(v) > 4 else ("set" if v else None)
+    return {
+        "groq_api_key": mask(groq),
+        "apify_token": mask(apify),
+        "tinyfish_api_key": mask(tinyfish),
+        "keys_configured": {
+            "groq": bool(groq or os.getenv("GROQ_API_KEY")),
+            "apify": bool(apify or os.getenv("APIFY_TOKEN")),
+            "tinyfish": bool(tinyfish or os.getenv("TINYFISH_API_KEY")),
+        }
+    }
+
 @app.get("/api/applications")
 async def get_applications():
     try:
@@ -201,8 +233,8 @@ async def search_jobs(req: JobSearchRequest):
             location=req.location,
             platforms=req.platforms,
             limit=req.limit,
-            apify_token=os.getenv("APIFY_TOKEN"),
-            tinyfish_key=os.getenv("TINYFISH_API_KEY"),
+            apify_token=db.get_config("apify_token") or os.getenv("APIFY_TOKEN"),
+            tinyfish_key=db.get_config("tinyfish_api_key") or os.getenv("TINYFISH_API_KEY"),
         )
         return {"success": True, **results}
     except Exception as e:
@@ -212,12 +244,14 @@ async def search_jobs(req: JobSearchRequest):
 @app.get("/api/search/platforms")
 async def get_platforms():
     """Returns available job search platforms and their configuration status."""
+    has_apify = bool(db.get_config("apify_token") or os.getenv("APIFY_TOKEN"))
+    has_tinyfish = bool(db.get_config("tinyfish_api_key") or os.getenv("TINYFISH_API_KEY"))
     return {
         "platforms": [
-            {"id": "linkedin",  "name": "LinkedIn",  "provider": "Apify",    "enabled": bool(os.getenv("APIFY_TOKEN"))},
-            {"id": "indeed",    "name": "Indeed",    "provider": "Apify",    "enabled": bool(os.getenv("APIFY_TOKEN"))},
-            {"id": "glassdoor", "name": "Glassdoor", "provider": "Apify",    "enabled": bool(os.getenv("APIFY_TOKEN"))},
-            {"id": "tinyfish",  "name": "Tinyfish",  "provider": "Tinyfish", "enabled": bool(os.getenv("TINYFISH_API_KEY"))},
+            {"id": "linkedin",  "name": "LinkedIn",  "provider": "Apify",    "enabled": has_apify},
+            {"id": "indeed",    "name": "Indeed",    "provider": "Apify",    "enabled": has_apify},
+            {"id": "glassdoor", "name": "Glassdoor", "provider": "Apify",    "enabled": has_apify},
+            {"id": "tinyfish",  "name": "Tinyfish",  "provider": "Tinyfish", "enabled": has_tinyfish},
         ]
     }
 

@@ -99,6 +99,14 @@ def init_db():
                 );
             """)
             
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             conn.commit()
             logger.info("Database initialized successfully.")
     except Exception as e:
@@ -243,5 +251,37 @@ def delete_job_application(app_id: int) -> None:
         conn.rollback()
         logger.error(f"Error deleting job application: {e}")
         raise
+    finally:
+        conn.close()
+
+def save_config(key: str, value: str) -> None:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO user_config (key, value, updated_at)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (key) DO UPDATE
+                    SET value = EXCLUDED.value,
+                        updated_at = CURRENT_TIMESTAMP;
+            """, (key, value))
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error saving config key={key}: {e}")
+        raise
+    finally:
+        conn.close()
+
+def get_config(key: str) -> str | None:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM user_config WHERE key = %s;", (key,))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error getting config key={key}: {e}")
+        return None
     finally:
         conn.close()
