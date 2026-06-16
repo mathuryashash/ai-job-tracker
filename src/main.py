@@ -255,6 +255,37 @@ async def get_platforms():
         ]
     }
 
+class JobSaveItem(BaseModel):
+    title: Optional[str] = None
+    company: Optional[str] = None
+    location: Optional[str] = None
+    description: Optional[str] = None
+    url: Optional[str] = None
+    platform: Optional[str] = None
+    employment_type: Optional[str] = None
+    salary: Optional[str] = None
+    posted_date: Optional[str] = None
+
+@app.post("/api/jobs/save")
+async def save_jobs_endpoint(jobs: List[JobSaveItem]):
+    """Save scraped jobs to the database (deduplicates by URL)."""
+    try:
+        saved = db.save_jobs([j.dict() for j in jobs])
+        return {"success": True, "saved": saved, "total": len(jobs)}
+    except Exception as e:
+        logger.error(f"Error saving jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/jobs/saved")
+async def get_saved_jobs():
+    """Return all saved jobs including any analysis results."""
+    try:
+        jobs = db.get_saved_jobs()
+        return {"success": True, "jobs": jobs, "total": len(jobs)}
+    except Exception as e:
+        logger.error(f"Error fetching saved jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("BACKEND_PORT", 8000))

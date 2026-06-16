@@ -107,6 +107,27 @@ def init_db():
                 );
             """)
 
+            # 5. Saved Jobs table (for scraped jobs from job search)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS saved_jobs (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT,
+                    company TEXT,
+                    location TEXT,
+                    description TEXT,
+                    url TEXT UNIQUE,
+                    platform TEXT,
+                    employment_type TEXT,
+                    salary TEXT,
+                    posted_date TEXT,
+                    ats_score FLOAT,
+                    missing_keywords TEXT[],
+                    cover_letter TEXT,
+                    optimized_resume TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
             conn.commit()
             logger.info("Database initialized successfully.")
     except Exception as e:
@@ -283,5 +304,75 @@ def get_config(key: str) -> str | None:
     except Exception as e:
         logger.error(f"Error getting config key={key}: {e}")
         return None
+    finally:
+        conn.close()
+
+def save_jobs(jobs: list) -> int:
+    """Insert scraped jobs, skip duplicates by URL. Returns count of newly inserted rows."""
+    conn = get_connection()
+    saved = 0
+    try:
+        with conn.cursor() as cur:
+            for job in jobs:
+                cur.execute("""
+                    INSERT INTO saved_jobs (title, company, location, description, url, platform, employment_type, salary, posted_date)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (url) DO NOTHING;
+                """, (
+                    job.get("title"), job.get("company"), job.get("location"),
+                    job.get("description"), job.get("url"), job.get("platform"),
+                    job.get("employment_type", ""), job.get("salary", ""),
+                    job.get("posted_date", "")
+                ))
+                if cur.rowcount:
+                    saved += 1
+        conn.commit()
+        return saved
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error saving jobs: {e}")
+        raise
+    finally:
+        conn.close()
+
+def get_saved_jobs() -> list:
+    """Return all saved jobs ordered by created_at desc."""
+    conn = get_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, title, company, location, description, url, platform,
+                       employment_type, salary, posted_date,
+                       ats_score, missing_keywords, cover_letter, optimized_resume,
+                       created_at
+                FROM saved_jobs
+                ORDER BY created_at DESC;
+            """)
+            return [dict(row) for row in cur.fetchall()]
+    except Exception as e:
+        logger.error(f"Error fetching saved jobs: {e}")
+        raise
+    finally:
+        conn.close()
+
+def update_job_analysis(job_id: int, ats_score: float, missing_keywords: list,
+                        cover_letter: str, optimized_resume: str) -> None:
+    """Update a saved job row with pipeline analysis results."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE saved_jobs
+                SET ats_score = %s,
+                    missing_keywords = %s,
+                    cover_letter = %s,
+                    optimized_resume = %s
+                WHERE id = %s;
+            """, (ats_score, missing_keywords, cover_letter, optimized_resume, job_id))
+            conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error updating job analysis id={job_id}: {e}")
+        raise
     finally:
         conn.close()
