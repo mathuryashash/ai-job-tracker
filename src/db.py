@@ -1,34 +1,42 @@
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from pgvector.psycopg2 import register_vector
 import logging
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-import subprocess
-import urllib.parse
+# pgvector is optional — only available when the extension is installed
+_pgvector_available = False
+try:
+    from pgvector.psycopg2 import register_vector as _register_vector
+    _pgvector_available = True
+except ImportError:
+    pass
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5434/resume_tracker")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:5432/resume_tracker")
 
 def get_connection():
-    """
-    Establishes and returns a database connection.
-    """
+    """Establishes and returns a database connection."""
     url = DATABASE_URL
-    # If using localhost/127.0.0.1 and we have wsl_ip.txt, resolve to WSL IP to avoid flaky port-forwarding issues
+    # BOM-safe WSL IP substitution: use utf-8-sig to strip BOM characters
     if "127.0.0.1" in url or "localhost" in url:
         try:
-            # Check if wsl_ip.txt exists in the workspace
             wsl_ip_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "wsl_ip.txt")
             if os.path.exists(wsl_ip_path):
-                with open(wsl_ip_path, "r") as f:
+                with open(wsl_ip_path, "r", encoding="utf-8-sig") as f:
                     wsl_ip = f.read().strip()
-                if wsl_ip:
-                    url = url.replace("127.0.0.1", wsl_ip).replace("localhost", wsl_ip)
-                    logger.info(f"WSL IP resolved from wsl_ip.txt: {wsl_ip}. Using URL: {url}")
+                # Only substitute if the WSL IP is reachable (skip on native Windows Postgres)
+                if wsl_ip and wsl_ip != "127.0.0.1":
+                    import socket
+                    try:
+                        socket.setdefaulttimeout(0.5)
+                        socket.socket().connect((wsl_ip, 5432))
+                        url = url.replace("127.0.0.1", wsl_ip).replace("localhost", wsl_ip)
+                        logger.info(f"WSL IP active, using: {wsl_ip}")
+                    except OSError:
+                        logger.info("WSL IP unreachable, using localhost PostgreSQL")
         except Exception as e:
             logger.warning(f"Failed to read wsl_ip.txt: {e}")
 
@@ -51,18 +59,24 @@ def get_connection():
 
 def init_db():
     """
-    Initializes the database: enables pgvector and creates necessary tables.
+    Initializes the database. pgvector is optional — tables degrade gracefully without it.
     """
+    global _pgvector_available
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            # 1. Enable pgvector extension
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            conn.commit()
-            
-            # Register pgvector for this connection
-            register_vector(conn)
-            
+            # 1. Try to enable pgvector extension (non-fatal if not installed)
+            try:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                conn.commit()
+                if _pgvector_available:
+                    _register_vector(conn)
+                logger.info("pgvector extension enabled.")
+            except Exception as e:
+                conn.rollback()
+                _pgvector_available = False
+                logger.warning(f"pgvector not available — embeddings disabled: {e}")
+
             # 2. Create Resumes table
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS resumes (
@@ -72,17 +86,17 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
-            
-            # 3. Create Resume Embeddings table
-            # Using 384 dimensions for sentence-transformers 'all-MiniLM-L6-v2' model
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS resume_embeddings (
-                    id SERIAL PRIMARY KEY,
-                    resume_id INTEGER REFERENCES resumes(id) ON DELETE CASCADE,
-                    embedding vector(384) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
+
+            # 3. Create Resume Embeddings table only if pgvector is available
+            if _pgvector_available:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS resume_embeddings (
+                        id SERIAL PRIMARY KEY,
+                        resume_id INTEGER REFERENCES resumes(id) ON DELETE CASCADE,
+                        embedding vector(384) NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
             
             # 4. Create Job Applications table
             cur.execute("""
@@ -158,10 +172,12 @@ def save_resume(filename: str, text: str) -> int:
         conn.close()
 
 def save_resume_embedding(resume_id: int, embedding) -> None:
+    if not _pgvector_available:
+        logger.info("pgvector unavailable — skipping embedding storage")
+        return
     conn = get_connection()
     try:
-        # Register pgvector
-        register_vector(conn)
+        _register_vector(conn)
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO resume_embeddings (resume_id, embedding) VALUES (%s, %s);",
@@ -172,7 +188,6 @@ def save_resume_embedding(resume_id: int, embedding) -> None:
     except Exception as e:
         conn.rollback()
         logger.error(f"Error saving resume embedding: {e}")
-        raise
     finally:
         conn.close()
 
@@ -189,13 +204,12 @@ def get_resume(resume_id: int):
         conn.close()
 
 def search_resumes_by_embedding(query_embedding, limit: int = 5):
-    """
-    Uses pgvector cosine distance (<=> operator) to find matching resumes.
-    1 - (embedding <=> query_embedding) gives the cosine similarity.
-    """
+    """Uses pgvector cosine distance to find matching resumes. Returns [] if pgvector unavailable."""
+    if not _pgvector_available:
+        return []
     conn = get_connection()
     try:
-        register_vector(conn)
+        _register_vector(conn)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT 
