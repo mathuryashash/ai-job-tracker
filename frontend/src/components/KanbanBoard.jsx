@@ -69,9 +69,10 @@ function AddCard({ onAdd }) {
 }
 
 export default function KanbanBoard({ refreshTick }) {
-  const [apps, setApps]     = useState([]);
+  const [apps, setApps]         = useState([]);
   const [dragging, setDragging] = useState(null);
   const [overCol, setOverCol]   = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -150,10 +151,15 @@ export default function KanbanBoard({ refreshTick }) {
                   onDragStart={e => onDragStart(e, app)}
                   style={{ borderLeft: `3px solid ${stage.color}` }}
                 >
-                  <div className="kanban-card-company">{app.company_name}</div>
-                  <div className="kanban-card-position">{app.position_title}</div>
-                  <div className="kanban-card-date">
-                    {app.created_at ? new Date(app.created_at).toLocaleDateString() : ''}
+                  <div
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setExpandedId(app.id === expandedId ? null : app.id)}
+                  >
+                    <div className="kanban-card-company">{app.company_name}</div>
+                    <div className="kanban-card-position">{app.position_title}</div>
+                    <div className="kanban-card-date">
+                      {app.created_at ? new Date(app.created_at).toLocaleDateString() : ''}
+                    </div>
                   </div>
                   <div className="kanban-card-actions">
                     <select
@@ -167,6 +173,36 @@ export default function KanbanBoard({ refreshTick }) {
                     </select>
                     <button className="btn btn-danger btn-sm" onClick={() => deleteCard(app.id)}>🗑</button>
                   </div>
+                  {expandedId === app.id && (
+                    <div style={{ padding: '12px', borderTop: '1px solid #eee', fontSize: '13px' }}>
+                      {app.ats_score && (
+                        <p style={{ marginBottom: '6px' }}>
+                          <strong>ATS Score:</strong> {app.ats_score}%
+                        </p>
+                      )}
+                      {app.missing_keywords && app.missing_keywords.length > 0 && (
+                        <p style={{ marginBottom: '6px' }}>
+                          <strong>Missing Keywords:</strong> {app.missing_keywords.join(', ')}
+                        </p>
+                      )}
+                      {app.cover_letter && (
+                        <details style={{ marginBottom: '6px' }}>
+                          <summary style={{ cursor: 'pointer', fontWeight: '600' }}>Cover Letter</summary>
+                          <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px', marginTop: '6px', background: '#f5f5f5', padding: '8px', borderRadius: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+                            {app.cover_letter}
+                          </pre>
+                        </details>
+                      )}
+                      {app.optimized_resume && (
+                        <details>
+                          <summary style={{ cursor: 'pointer', fontWeight: '600' }}>Optimized Resume</summary>
+                          <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px', marginTop: '6px', background: '#f5f5f5', padding: '8px', borderRadius: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+                            {app.optimized_resume}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

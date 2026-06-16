@@ -149,6 +149,24 @@ export default function ResumeAnalyzer() {
                 </div>
                 <div className="cover-letter-box">{results.cover_letter}</div>
               </div>
+
+              {/* Optimized resume */}
+              {results.optimized_resume && (
+                <div className="card">
+                  <div className="flex items-center justify-between mb-16">
+                    <div className="section-title" style={{ marginBottom: 0 }}>📝 ATS-Optimized Resume</div>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => navigator.clipboard.writeText(results.optimized_resume)}
+                    >
+                      📋 Copy
+                    </button>
+                  </div>
+                  <pre style={{ whiteSpace: 'pre-wrap', fontSize: '13px', background: '#f9f9f9', padding: '12px', borderRadius: '6px', maxHeight: '400px', overflowY: 'auto' }}>
+                    {results.optimized_resume}
+                  </pre>
+                </div>
+              )}
             </>
           ) : (
             <div className="card" style={{ height: '100%', minHeight: 400 }}>
