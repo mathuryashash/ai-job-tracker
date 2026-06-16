@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../api/client';
+import { api, saveKeys } from '../api/client';
 
 export default function Settings() {
   const [groqKey, setGroqKey] = useState('');
@@ -24,17 +24,16 @@ export default function Settings() {
     setLoading(true);
     setMessage({ text: '', type: '' });
     try {
+      await saveKeys({
+        groqApiKey: groqKey,
+        apifyToken: apifyToken,
+        tinyfishApiKey: tinyfishKey,
+      });
       localStorage.setItem('groq_api_key', groqKey);
       localStorage.setItem('groq_model', model);
       localStorage.setItem('apify_token', apifyToken);
       localStorage.setItem('tinyfish_key', tinyfishKey);
-
-      // Save credentials backend-side using the update/config flow if supported
-      // Or inform user to set environment variables if API keys are system-wide
-      setMessage({
-        text: 'Configuration saved to browser local storage. Please restart your backend server if API keys like APIFY_TOKEN are not set in your .env file.',
-        type: 'success'
-      });
+      setMessage({ text: 'Settings saved successfully.', type: 'success' });
     } catch (e) {
       setMessage({ text: 'Error saving settings: ' + e.message, type: 'error' });
     } finally {

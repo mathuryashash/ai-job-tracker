@@ -69,3 +69,17 @@ export const api = {
   getPlatforms: () =>
     fetch(`${BASE}/api/search/platforms`, { headers: headers() }).then(handleResponse),
 };
+
+export async function saveKeys({ groqApiKey, apifyToken, tinyfishApiKey }) {
+  const res = await fetch('/api/keys', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      groq_api_key: groqApiKey || undefined,
+      apify_token: apifyToken || undefined,
+      tinyfish_api_key: tinyfishApiKey || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to save keys: ${res.status}`);
+  return res.json();
+}
