@@ -273,6 +273,41 @@ def build_pipeline():
 # Instantiate the pipeline
 pipeline_app = build_pipeline()
 
+def run_batch_pipeline(resume_id: int, resume_text: str, job_description: str,
+                       groq_api_key: str = None) -> dict:
+    """
+    Batch-mode pipeline that skips PDF loading (resume already in DB).
+    Starts from extract_keywords with pre-filled resume_text and resume_id.
+    """
+    initial_state = {
+        "resume_path": "",
+        "filename": "",
+        "job_description": job_description,
+        "resume_text": resume_text,
+        "resume_id": resume_id,
+        "extracted_keywords": [],
+        "match_score": 0.0,
+        "missing_keywords": [],
+        "cover_letter": "",
+        "optimized_resume": "",
+        "groq_api_key": groq_api_key,
+    }
+    # Build a batch pipeline that starts at extract_keywords
+    from langgraph.graph import StateGraph, END
+    workflow = StateGraph(PipelineState)
+    workflow.add_node("extract_keywords", extract_keywords_node)
+    workflow.add_node("calculate_rag_alignment", calculate_rag_alignment_node)
+    workflow.add_node("generate_cover_letter", generate_cover_letter_node)
+    workflow.add_node("generate_optimized_resume", generate_optimized_resume_node)
+    workflow.set_entry_point("extract_keywords")
+    workflow.add_edge("extract_keywords", "calculate_rag_alignment")
+    workflow.add_edge("calculate_rag_alignment", "generate_cover_letter")
+    workflow.add_edge("generate_cover_letter", "generate_optimized_resume")
+    workflow.add_edge("generate_optimized_resume", END)
+    batch_app = workflow.compile()
+    return batch_app.invoke(initial_state)
+
+
 def run_analysis_pipeline(resume_path: str, filename: str, job_description: str, groq_api_key: Optional[str] = None) -> dict:
     """
     Wrapper to run the compiled LangGraph pipeline.

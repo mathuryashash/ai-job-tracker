@@ -1,7 +1,8 @@
+import asyncio
 import os
 import shutil
 from typing import Optional, List
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Header
+from fastapi import BackgroundTasks, FastAPI, UploadFile, File, Form, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -286,6 +287,62 @@ async def get_saved_jobs():
     except Exception as e:
         logger.error(f"Error fetching saved jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+class BatchAnalyzeRequest(BaseModel):
+    resume_id: int
+    groq_api_key: Optional[str] = None
+
+@app.post("/api/analyze-batch")
+async def analyze_batch(request: BatchAnalyzeRequest, background_tasks: BackgroundTasks):
+    """
+    Runs the analysis pipeline against all saved jobs for a given resume.
+    Uses background tasks and 1.5s throttle between Groq calls (free-tier safe).
+    """
+    resume = db.get_resume(request.resume_id)
+    if not resume:
+        raise HTTPException(status_code=404, detail=f"Resume {request.resume_id} not found")
+
+    jobs = db.get_saved_jobs()
+    # Only process jobs that have a job description
+    jobs_with_jd = [j for j in jobs if j.get("description")]
+
+    groq_key = request.groq_api_key or db.get_config("groq_api_key") or os.getenv("GROQ_API_KEY")
+
+    async def process_jobs():
+        processed = 0
+        errors = 0
+        for job in jobs_with_jd:
+            try:
+                result = pipeline.run_batch_pipeline(
+                    resume_id=resume["id"],
+                    resume_text=resume["extracted_text"],
+                    job_description=job["description"],
+                    groq_api_key=groq_key,
+                )
+                db.update_job_analysis(
+                    job_id=job["id"],
+                    ats_score=result.get("match_score", 0.0),
+                    missing_keywords=result.get("missing_keywords", []),
+                    cover_letter=result.get("cover_letter", ""),
+                    optimized_resume=result.get("optimized_resume", ""),
+                )
+                processed += 1
+                logger.info(f"Batch: processed job {job['id']} ({job.get('title','?')}) score={result.get('match_score')}")
+            except Exception as e:
+                errors += 1
+                logger.error(f"Batch: failed job {job['id']}: {e}")
+            # Rate-limit throttle: 1.5s between jobs = ~2.7 calls/sec across 4 Groq calls
+            await asyncio.sleep(1.5)
+        logger.info(f"Batch analysis complete: {processed} processed, {errors} errors")
+
+    background_tasks.add_task(process_jobs)
+    return {
+        "success": True,
+        "message": "Batch analysis started in background",
+        "resume_id": request.resume_id,
+        "jobs_queued": len(jobs_with_jd),
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
