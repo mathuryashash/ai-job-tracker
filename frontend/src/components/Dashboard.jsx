@@ -1,9 +1,32 @@
 import { useState, useEffect } from 'react';
-import { api } from '../api/client';
+import { api, batchAnalyzeJobs } from '../api/client';
 
 export default function Dashboard({ setView }) {
-  const [apps, setApps]     = useState([]);
-  const [health, setHealth] = useState(null);
+  const [apps, setApps]         = useState([]);
+  const [health, setHealth]     = useState(null);
+  const [message, setMessage]   = useState('');
+  const [msgType, setMsgType]   = useState('');
+
+  async function handleBatchAnalyze() {
+    const resumeId = localStorage.getItem('last_resume_id') || localStorage.getItem('resume_id');
+    const groqKey  = localStorage.getItem('groq_api_key');
+    if (!resumeId) {
+      setMsgType('error');
+      setMessage('Please upload your resume in the Resume Analyzer first');
+      return;
+    }
+    try {
+      const result = await batchAnalyzeJobs({
+        resumeId: parseInt(resumeId),
+        groqApiKey: groqKey,
+      });
+      setMsgType('success');
+      setMessage(`Analyzing ${result.jobs_queued} saved jobs in background…`);
+    } catch (err) {
+      setMsgType('error');
+      setMessage(err.message);
+    }
+  }
 
   useEffect(() => {
     api.getApplications()
@@ -39,8 +62,15 @@ export default function Dashboard({ setView }) {
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-primary" onClick={() => setView('analyzer')}>📄 New Analysis</button>
           <button className="btn btn-secondary" onClick={() => setView('jobs')}>🔍 Search Jobs</button>
+          <button className="btn btn-secondary" onClick={handleBatchAnalyze}>⚡ Analyze All Saved Jobs</button>
         </div>
       </div>
+
+      {message && (
+        <div className={`alert alert-${msgType === 'error' ? 'error' : 'success'}`} style={{ marginBottom: 16 }}>
+          {message}
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid-4 mb-24">

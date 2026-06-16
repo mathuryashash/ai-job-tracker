@@ -70,6 +70,29 @@ export const api = {
     fetch(`${BASE}/api/search/platforms`, { headers: headers() }).then(handleResponse),
 };
 
+export async function saveJobsToDB(jobs) {
+  const res = await fetch('/api/jobs/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(jobs),
+  });
+  if (!res.ok) throw new Error(`Failed to save jobs: ${res.status}`);
+  return res.json();
+}
+
+export async function batchAnalyzeJobs({ resumeId, groqApiKey }) {
+  const res = await fetch('/api/analyze-batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      resume_id: resumeId,
+      groq_api_key: groqApiKey || undefined,
+    }),
+  });
+  if (!res.ok) throw new Error(`Failed to start batch analysis: ${res.status}`);
+  return res.json();
+}
+
 export async function saveKeys({ groqApiKey, apifyToken, tinyfishApiKey }) {
   const res = await fetch('/api/keys', {
     method: 'POST',

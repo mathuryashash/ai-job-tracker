@@ -28,6 +28,7 @@ export default function ResumeAnalyzer() {
     setError(''); setLoading(true);
     try {
       const data = await api.analyze(file, jd);
+      if (data.resume_id) localStorage.setItem('last_resume_id', data.resume_id);
       setResults(data);
     } catch (e) {
       setError(e.message);

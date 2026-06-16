@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../api/client';
+import { api, saveJobsToDB } from '../api/client';
 
 const PLATFORM_META = {
   linkedin:  { label: 'LinkedIn',  icon: '💼', color: '#0a66c2' },
@@ -53,6 +53,17 @@ export default function JobSearch({ onSaveJob }) {
         job_description: job.description,
         status: 'todo',
       });
+      await saveJobsToDB([{
+        title:           job.title,
+        company:         job.company,
+        location:        job.location,
+        description:     job.description,
+        url:             job.url,
+        platform:        job.platform,
+        employment_type: job.employment_type,
+        salary:          job.salary,
+        posted_date:     job.posted_date,
+      }]);
       onSaveJob?.();
     } catch (e) {
       setError('Failed to save job: ' + e.message);
