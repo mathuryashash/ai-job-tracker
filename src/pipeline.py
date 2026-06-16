@@ -41,6 +41,7 @@ class PipelineState(TypedDict):
     match_score: Optional[float]
     missing_keywords: Optional[List[str]]
     cover_letter: Optional[str]
+    optimized_resume: Optional[str]
     groq_api_key: Optional[str]
 
 # Pydantic schemas for structured LLM outputs
@@ -203,6 +204,48 @@ def generate_cover_letter_node(state: PipelineState) -> PipelineState:
         "cover_letter": cover_letter
     }
 
+def generate_optimized_resume_node(state: PipelineState) -> PipelineState:
+    """Rewrites the resume to be ATS-optimized for this specific job description."""
+    resume_text = state["resume_text"]
+    job_description = state["job_description"]
+    missing_keywords = state.get("missing_keywords") or []
+
+    print("[Node: generate_optimized_resume] Rewriting resume for ATS optimization")
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", (
+            "You are an expert resume writer and ATS optimization specialist. "
+            "Rewrite the provided resume to maximize ATS match for the given job description.\n"
+            "Rules:\n"
+            "- Naturally incorporate the missing keywords where truthful and relevant\n"
+            "- Mirror the language and terminology used in the job description\n"
+            "- Do NOT fabricate experience, credentials, or skills\n"
+            "- Preserve the overall structure (Summary, Experience, Skills, Education)\n"
+            "- Output plain text resume ready for formatting"
+        )),
+        ("human", (
+            "ORIGINAL RESUME:\n{resume}\n\n"
+            "JOB DESCRIPTION:\n{jd}\n\n"
+            "KEYWORDS TO INCORPORATE WHERE RELEVANT:\n{keywords}\n\n"
+            "Write the ATS-optimized resume:"
+        ))
+    ])
+
+    llm = get_llm(state.get("groq_api_key"))
+    chain = prompt | llm
+    try:
+        result = chain.invoke({
+            "resume": resume_text,
+            "jd": job_description,
+            "keywords": ", ".join(missing_keywords) if missing_keywords else "none identified"
+        })
+        optimized_resume = result.content
+    except Exception as e:
+        print(f"Error generating optimized resume: {e}")
+        optimized_resume = ""
+
+    return {**state, "optimized_resume": optimized_resume}
+
 # --- Compile LangGraph ---
 
 from langgraph.graph import StateGraph, END
@@ -215,13 +258,15 @@ def build_pipeline():
     workflow.add_node("extract_keywords", extract_keywords_node)
     workflow.add_node("calculate_rag_alignment", calculate_rag_alignment_node)
     workflow.add_node("generate_cover_letter", generate_cover_letter_node)
-    
+    workflow.add_node("generate_optimized_resume", generate_optimized_resume_node)
+
     # Add Edges
     workflow.set_entry_point("load_resume")
     workflow.add_edge("load_resume", "extract_keywords")
     workflow.add_edge("extract_keywords", "calculate_rag_alignment")
     workflow.add_edge("calculate_rag_alignment", "generate_cover_letter")
-    workflow.add_edge("generate_cover_letter", END)
+    workflow.add_edge("generate_cover_letter", "generate_optimized_resume")
+    workflow.add_edge("generate_optimized_resume", END)
     
     return workflow.compile()
 
@@ -242,6 +287,7 @@ def run_analysis_pipeline(resume_path: str, filename: str, job_description: str,
         "match_score": 0.0,
         "missing_keywords": [],
         "cover_letter": "",
+        "optimized_resume": "",
         "groq_api_key": groq_api_key
     }
     

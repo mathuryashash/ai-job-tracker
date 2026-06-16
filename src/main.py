@@ -113,7 +113,8 @@ async def analyze_resume(
             "match_score": result["match_score"],
             "extracted_keywords": result["extracted_keywords"],
             "missing_keywords": result["missing_keywords"],
-            "cover_letter": result["cover_letter"]
+            "cover_letter": result["cover_letter"],
+            "optimized_resume": result["optimized_resume"]
         })
         
     except Exception as e:
