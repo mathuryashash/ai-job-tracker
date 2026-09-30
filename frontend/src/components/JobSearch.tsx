@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api, saveJobsToDB } from '../api/client';
+import { useToast } from './Toast';
 
 const PLATFORM_META = {
   linkedin:  { label: 'LinkedIn',  icon: '💼', color: '#0a66c2' },
@@ -9,14 +10,16 @@ const PLATFORM_META = {
 };
 
 export default function JobSearch({ onSaveJob }) {
-  const [query, setQuery]         = useState('');
+  const showToast = useToast();
+  const [query, setQuery]         = useState(() => localStorage.getItem('target_role') || '');
   const [location, setLocation]   = useState('');
-  const [platforms, setPlatforms] = useState(['linkedin', 'indeed']);
+  const [platforms, setPlatforms] = useState(['remoteok', 'usajobs']);
   const [available, setAvailable] = useState([]);
   const [results, setResults]     = useState([]);
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState('');
   const [searched, setSearched]   = useState(false);
+  const [savingId, setSavingId]   = useState(null);
 
   useEffect(() => {
     api.getPlatforms()
@@ -46,6 +49,8 @@ export default function JobSearch({ onSaveJob }) {
   }
 
   async function saveToKanban(job) {
+    const id = job.url || job.title + job.company;
+    setSavingId(id);
     try {
       await api.createApplication({
         company_name:   job.company,
@@ -65,8 +70,12 @@ export default function JobSearch({ onSaveJob }) {
         posted_date:     job.posted_date,
       }]);
       onSaveJob?.();
+      showToast('Saved to tracker ✓', 'success');
     } catch (e) {
+      showToast('Failed to save job', 'error');
       setError('Failed to save job: ' + e.message);
+    } finally {
+      setSavingId(null);
     }
   }
 
@@ -74,7 +83,7 @@ export default function JobSearch({ onSaveJob }) {
     <div className="page">
       <div className="page-header">
         <div className="page-title">🔍 Automated Job Search</div>
-        <div className="page-subtitle">Search LinkedIn, Indeed, Glassdoor & Tinyfish simultaneously via Apify</div>
+        <div className="page-subtitle">Free sources: RemoteOK, USAJOBS + LinkedIn/Indeed/Glassdoor via Apify when configured</div>
       </div>
 
       {/* Search form */}
@@ -88,6 +97,18 @@ export default function JobSearch({ onSaveJob }) {
               onChange={e => setQuery(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
             />
+            {localStorage.getItem('target_role') && query === localStorage.getItem('target_role') && (
+              <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className="badge badge-blue">🎯 Auto-filled from resume analysis</span>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => { setQuery(''); localStorage.removeItem('target_role'); }}
+                  style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                >
+                  ✕ Clear
+                </button>
+              </div>
+            )}
           </div>
           <div className="form-group">
             <label>Location</label>
@@ -160,8 +181,8 @@ export default function JobSearch({ onSaveJob }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {results.map((job, i) => (
-              <div key={i} className="job-card">
+            {results.map((job) => (
+              <div key={`${job.platform || 'job'}-${job.url || `${job.title}-${job.company}`}`} className="job-card">
                 <div className="job-card-header">
                   <div>
                     <div className="job-card-title">{job.title}</div>
@@ -189,8 +210,8 @@ export default function JobSearch({ onSaveJob }) {
                       🔗 View Job
                     </a>
                   )}
-                  <button className="btn btn-primary btn-sm" onClick={() => saveToKanban(job)}>
-                    ➕ Save to Tracker
+                  <button className="btn btn-primary btn-sm" onClick={() => saveToKanban(job)} disabled={!!savingId}>
+                    {savingId === (job.url || job.title + job.company) ? <><span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Saving…</> : '➕ Save to Tracker'}
                   </button>
                 </div>
               </div>
