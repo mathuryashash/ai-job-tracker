@@ -23,7 +23,13 @@ export default function JobSearch({ onSaveJob }) {
 
   useEffect(() => {
     api.getPlatforms()
-      .then(d => setAvailable(d.platforms || []))
+      .then(d => {
+        const list = d.platforms || [];
+        setAvailable(list);
+        // Drop default selections the backend reports as unconfigured —
+        // disabled toggles can't be clicked off, so they'd error on every search.
+        setPlatforms(prev => prev.filter(id => list.some((p: any) => p.id === id && p.enabled)));
+      })
       .catch(() => {});
   }, []);
 

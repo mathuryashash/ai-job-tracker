@@ -122,14 +122,17 @@ class AdzunaAPISearcher:
 
 
 class USAJOBSAPISearcher:
-    """USAJOBS federal job search. Free but requires a real contact email
-    in the User-Agent — see https://developer.usajobs.gov/APIRequest/."""
+    """USAJOBS federal job search. Free, but every request needs an
+    Authorization-Key (free API key) plus the registered email as User-Agent —
+    see https://developer.usajobs.gov/guides/authentication. Without the key
+    the API answers 401."""
 
     BASE_URL = "https://data.usajobs.gov/api/search"
 
-    def __init__(self, user_agent: Optional[str] = None):
+    def __init__(self, api_key: str, user_agent: Optional[str] = None):
         self.headers = {
             "User-Agent": user_agent or config.USAJOBS_USER_AGENT,
+            "Authorization-Key": api_key,
             "Accept": "application/json",
         }
 
@@ -246,9 +249,9 @@ def _search_sync_free(query: str, location: str, platforms: List[str],
         except Exception as e:
             logger.warning("RemoteOK failed: %s", e)
 
-    if "usajobs" in platforms:
+    if "usajobs" in platforms and api_keys.get("usajobs_key"):
         try:
-            jobs = USAJOBSAPISearcher().search(query, location, limit)
+            jobs = USAJOBSAPISearcher(api_keys["usajobs_key"]).search(query, location, limit)
             all_jobs.extend(jobs)
             if jobs:
                 sources_used.append("USAJOBS")
@@ -307,7 +310,8 @@ def search_jobs_unified(query: str, location: str = "",
                          api_keys: Optional[Dict[str, str]] = None,
                          jsearch_key: Optional[str] = None,
                          adzuna_app_id: Optional[str] = None,
-                         adzuna_key: Optional[str] = None) -> Dict:
+                         adzuna_key: Optional[str] = None,
+                         usajobs_key: Optional[str] = None) -> Dict:
     """Unified job search — free APIs first, optional paid providers when keys set.
 
     Returns: {jobs, total, sources, errors}
@@ -321,8 +325,13 @@ def search_jobs_unified(query: str, location: str = "",
     if adzuna_app_id and adzuna_key:
         keys["adzuna_app_id"] = adzuna_app_id
         keys["adzuna_key"] = adzuna_key
+    if usajobs_key:
+        keys["usajobs_key"] = usajobs_key
 
     errors: List[str] = []
+
+    if "usajobs" in platforms and not keys.get("usajobs_key"):
+        errors.append("USAJOBS requires USAJOBS_API_KEY (free at developer.usajobs.gov); skipped.")
 
     # If user requests paid platforms without keys, fall back to free sources
     paid = {"linkedin", "indeed", "glassdoor"}

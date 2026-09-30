@@ -18,6 +18,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import tempfile
@@ -240,18 +241,25 @@ async def analyze_resume(
     if not contents.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail="File is not a valid PDF.")
 
+    # Fail fast before touching disk/DB: without a key every LLM node fails,
+    # the pipeline would still persist an orphan resume row, then 500.
+    groq_key = (
+        x_groq_api_key
+        or db.get_config("groq_api_key")
+        or os.getenv("GROQ_API_KEY")
+    )
+    if not groq_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Groq API key not configured. Add it in Settings or set GROQ_API_KEY.",
+        )
+
     # B4: write to a sanitized tempfile, not the project dir + user-supplied name.
     safe_name = os.path.basename(file.filename).replace("..", "_")
     fd, temp_path = tempfile.mkstemp(suffix=".pdf", prefix="resume_", dir=tempfile.gettempdir())
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(contents)
-
-        groq_key = (
-            x_groq_api_key
-            or db.get_config("groq_api_key")
-            or os.getenv("GROQ_API_KEY")
-        )
 
         # B9: run the (still-sync) LangGraph pipeline in an executor so we don't
         # block the event loop. B16: monitor request.is_disconnected() so we
@@ -336,6 +344,8 @@ async def get_applications():
 
 @app.post("/api/applications")
 async def create_application(app_data: ApplicationCreate):
+    if app_data.status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of {VALID_STATUSES}")
     try:
         app_id = db.save_job_application(
             company_name=app_data.company_name,
@@ -386,6 +396,12 @@ async def search_jobs(req: JobSearchRequest):
             limit=req.limit,
             apify_token=db.get_config("apify_token") or os.getenv("APIFY_TOKEN"),
             tinyfish_key=db.get_config("tinyfish_api_key") or os.getenv("TINYFISH_API_KEY"),
+            # Optional providers advertised by /api/search/platforms from env —
+            # they must actually be forwarded or they're silently never queried.
+            jsearch_key=os.getenv("JSEARCH_KEY"),
+            adzuna_app_id=os.getenv("ADZUNA_APP_ID"),
+            adzuna_key=os.getenv("ADZUNA_KEY"),
+            usajobs_key=os.getenv("USAJOBS_API_KEY"),
         )
         return {"success": True, **results}
     except Exception as e:
@@ -400,7 +416,7 @@ async def get_platforms():
     return {
         "platforms": [
             {"id": "remoteok",  "name": "RemoteOK",  "provider": "Free",     "enabled": True},
-            {"id": "usajobs",   "name": "USAJOBS",   "provider": "Free",     "enabled": True},
+            {"id": "usajobs",   "name": "USAJOBS",   "provider": "Free",     "enabled": bool(os.getenv("USAJOBS_API_KEY"))},
             {"id": "jsearch",   "name": "JSearch",   "provider": "RapidAPI", "enabled": bool(os.getenv("JSEARCH_KEY"))},
             {"id": "adzuna",    "name": "Adzuna",    "provider": "Adzuna",   "enabled": bool(os.getenv("ADZUNA_APP_ID") and os.getenv("ADZUNA_KEY"))},
             {"id": "linkedin",  "name": "LinkedIn",  "provider": "Apify",    "enabled": has_apify},
@@ -439,19 +455,35 @@ async def analyze_batch(request: BatchAnalyzeRequest, background_tasks: Backgrou
     if not resume:
         raise HTTPException(status_code=404, detail=f"Resume {request.resume_id} not found")
 
+    groq_key = request.groq_api_key or db.get_config("groq_api_key") or os.getenv("GROQ_API_KEY")
+    if not groq_key:
+        # Otherwise every queued job fails in the background and the client
+        # is told the batch "started" successfully.
+        raise HTTPException(
+            status_code=400,
+            detail="Groq API key not configured. Add it in Settings or set GROQ_API_KEY.",
+        )
+
     jobs = db.get_saved_jobs()
     jobs_with_jd = [j for j in jobs if j.get("description")]
-    groq_key = request.groq_api_key or db.get_config("groq_api_key") or os.getenv("GROQ_API_KEY")
 
     async def process_jobs():
         processed = errors = 0
+        loop = asyncio.get_running_loop()
         for job in jobs_with_jd:
             try:
-                result = pipeline.run_batch_pipeline(
-                    resume_id=resume["id"],
-                    resume_text=resume["extracted_text"],
-                    job_description=job["description"],
-                    groq_api_key=groq_key,
+                # The LangGraph pipeline is synchronous (LLM + embedding calls);
+                # run it in the default executor so the event loop keeps
+                # serving other requests while the batch runs.
+                result = await loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        pipeline.run_batch_pipeline,
+                        resume_id=resume["id"],
+                        resume_text=resume["extracted_text"],
+                        job_description=job["description"],
+                        groq_api_key=groq_key,
+                    ),
                 )
                 db.update_job_analysis(
                     job_id=job["id"],
