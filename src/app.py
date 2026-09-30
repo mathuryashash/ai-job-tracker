@@ -1,8 +1,13 @@
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import requests
 import streamlit as st
 import plotly.graph_objects as go
-import pandas as pd
+
+from src import config
 
 # Page Configuration
 st.set_page_config(page_title="AI Resume & Job Tracker", page_icon="💼", layout="wide")
@@ -100,6 +105,8 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 # Setup default session state values
 if "groq_api_key" not in st.session_state:
     st.session_state["groq_api_key"] = os.getenv("GROQ_API_KEY", "")
+if "groq_model" not in st.session_state:
+    st.session_state["groq_model"] = os.getenv("GROQ_MODEL", config.GROQ_MODEL)
 
 # Tabs navigation
 tab_analyzer, tab_kanban, tab_settings = st.tabs(["📄 Resume Analyzer", "📋 Kanban Tracker", "⚙️ Configuration"])
@@ -307,8 +314,12 @@ with tab_settings:
     st.markdown("### ⚙️ Engine Configurations")
     
     groq_key = st.text_input("Groq API Key", value=st.session_state["groq_api_key"], type="password")
-    model_opt = st.selectbox("LLM Model Name", ["llama3-70b-8192", "llama-3.1-70b-versatile"], index=0)
-    
+    model_opt = st.selectbox(
+        "LLM Model Name",
+        ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "openai/gpt-oss-120b"],
+        index=0,
+    )
+
     if st.button("Save Configurations", use_container_width=True):
         st.session_state["groq_api_key"] = groq_key
         # Update local environment variables so the pipeline script loads the saved key

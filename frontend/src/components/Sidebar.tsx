@@ -16,14 +16,16 @@ export default function Sidebar({ active, setActive, health }) {
 
       <nav className="sidebar-nav">
         {nav.map(item => (
-          <div
+          <button
             key={item.id}
             className={`nav-item ${active === item.id ? 'active' : ''}`}
             onClick={() => setActive(item.id)}
+            aria-current={active === item.id ? 'page' : undefined}
+            type="button"
           >
-            <span className="nav-icon">{item.icon}</span>
+            <span className="nav-icon" aria-hidden="true">{item.icon}</span>
             {item.label}
-          </div>
+          </button>
         ))}
       </nav>
 
