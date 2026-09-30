@@ -1,56 +1,49 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { api, batchAnalyzeJobs } from '../api/client';
+import { useToast } from './Toast';
 
-export default function Dashboard({ setView }) {
-  const [apps, setApps]         = useState([]);
-  const [health, setHealth]     = useState(null);
-  const [message, setMessage]   = useState('');
-  const [msgType, setMsgType]   = useState('');
+export default function Dashboard({ setView }: { setView: (v: string) => void }) {
+  const showToast = useToast();
+  const [apps, setApps] = useState<any[]>([]);
+  const [health, setHealth] = useState<any>(null);
 
   async function handleBatchAnalyze() {
-    const resumeId = localStorage.getItem('last_resume_id') || localStorage.getItem('resume_id');
-    const groqKey  = localStorage.getItem('groq_api_key');
+    const resumeId = localStorage.getItem('last_resume_id');
     if (!resumeId) {
-      setMsgType('error');
-      setMessage('Please upload your resume in the Resume Analyzer first');
+      showToast('Please upload your resume in the Resume Analyzer first', 'error');
       return;
     }
     try {
-      const result = await batchAnalyzeJobs({
-        resumeId: parseInt(resumeId),
-        groqApiKey: groqKey,
-      });
-      setMsgType('success');
-      setMessage(`Analyzing ${result.jobs_queued} saved jobs in background…`);
-    } catch (err) {
-      setMsgType('error');
-      setMessage(err.message);
+      // No need to send the Groq key — backend already has it from
+      // user_config / env. Sending it again is redundant.
+      const result = await batchAnalyzeJobs({ resumeId: parseInt(resumeId) });
+      showToast(`Analyzing ${result.jobs_queued} saved jobs in background…`, 'success');
+    } catch (err: any) {
+      showToast(err.message, 'error');
     }
   }
 
   useEffect(() => {
-    api.getApplications()
-      .then(d => setApps(d.data || []))
-      .catch(() => {});
-    api.health()
-      .then(setHealth)
-      .catch(() => {});
+    api.getApplications().then((d) => setApps(d.data || [])).catch(() => {});
+    api.health().then(setHealth).catch(() => {});
   }, []);
 
   const stats = {
-    total:        apps.length,
-    todo:         apps.filter(a => a.status === 'todo').length,
-    applied:      apps.filter(a => a.status === 'applied').length,
-    interviewing: apps.filter(a => a.status === 'interviewing').length,
-    offer:        apps.filter(a => a.status === 'offer').length,
-    rejected:     apps.filter(a => a.status === 'rejected').length,
+    total: apps.length,
+    todo: apps.filter((a) => a.status === 'todo').length,
+    applied: apps.filter((a) => a.status === 'applied').length,
+    interviewing: apps.filter((a) => a.status === 'interviewing').length,
+    offer: apps.filter((a) => a.status === 'offer').length,
+    rejected: apps.filter((a) => a.status === 'rejected').length,
   };
 
   const recentApps = [...apps]
-    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
     .slice(0, 5);
 
-  const STATUS_COLOR = { todo: '#6366f1', applied: '#3b82f6', interviewing: '#f59e0b', offer: '#10b981', rejected: '#ef4444' };
+  const STATUS_COLOR: Record<string, string> = {
+    todo: '#6366f1', applied: '#3b82f6', interviewing: '#f59e0b', offer: '#10b981', rejected: '#ef4444',
+  };
 
   return (
     <div className="page">
@@ -66,13 +59,6 @@ export default function Dashboard({ setView }) {
         </div>
       </div>
 
-      {message && (
-        <div className={`alert alert-${msgType === 'error' ? 'error' : 'success'}`} style={{ marginBottom: 16 }}>
-          {message}
-        </div>
-      )}
-
-      {/* Stats */}
       <div className="grid-4 mb-24">
         <div className="card" style={{ borderTop: '3px solid #6366f1' }}>
           <div className="card-title">Total Applications</div>
@@ -97,7 +83,6 @@ export default function Dashboard({ setView }) {
       </div>
 
       <div className="grid-2">
-        {/* Pipeline funnel */}
         <div className="card">
           <div className="section-title">Pipeline Breakdown</div>
           {[
@@ -106,7 +91,7 @@ export default function Dashboard({ setView }) {
             { label: 'Interviewing', count: stats.interviewing, color: '#f59e0b' },
             { label: 'Offer', count: stats.offer, color: '#10b981' },
             { label: 'Rejected', count: stats.rejected, color: '#ef4444' },
-          ].map(item => (
+          ].map((item) => (
             <div key={item.label} style={{ marginBottom: 14 }}>
               <div className="flex items-center justify-between mb-8">
                 <span className="text-sm text-muted">{item.label}</span>
@@ -129,7 +114,6 @@ export default function Dashboard({ setView }) {
           </button>
         </div>
 
-        {/* Recent activity */}
         <div className="card">
           <div className="section-title">Recent Applications</div>
           {recentApps.length === 0 ? (
@@ -138,7 +122,7 @@ export default function Dashboard({ setView }) {
               <div className="empty-state-text">No applications yet</div>
             </div>
           ) : (
-            recentApps.map(app => (
+            recentApps.map((app) => (
               <div key={app.id} className="activity-item">
                 <div className="activity-dot" style={{ background: STATUS_COLOR[app.status] }} />
                 <div style={{ flex: 1 }}>
@@ -150,14 +134,13 @@ export default function Dashboard({ setView }) {
             ))
           )}
 
-          {/* Backend health */}
           <div className="divider" />
           <div style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
             <div className="flex items-center gap-8">
               <span className="status-dot" style={!health ? { background: '#ef4444', boxShadow: '0 0 8px #ef4444' } : {}} />
               {health ? `API: ${health.service} · DB: ${health.database}` : 'API Offline'}
             </div>
-            {health && <div className="mt-8">Model: {health.groq_model || 'llama3-70b-8192'}</div>}
+            {health && <div className="mt-8">Model: {health.groq_model || 'llama-3.3-70b-versatile'}</div>}
           </div>
         </div>
       </div>
