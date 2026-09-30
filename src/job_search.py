@@ -11,8 +11,10 @@ re-implemented — only providers that the orchestrator actually calls remain.
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
+import re
 from typing import Dict, List, Optional
 
 import requests
@@ -68,7 +70,7 @@ class JSearchAPISearcher:
             "title": item.get("job_title", "Unknown Position"),
             "company": item.get("employer_name", "Unknown Company"),
             "location": loc,
-            "description": (item.get("job_description", "") or "")[:2000],
+            "description": clean_description(item.get("job_description")),
             "url": item.get("job_apply_link") or item.get("job_google_link") or "",
             "posted_date": item.get("job_posted_at_datetime_utc", ""),
             "employment_type": item.get("job_employment_type", "") or "",
@@ -111,7 +113,7 @@ class AdzunaAPISearcher:
             "title": item.get("title", "Unknown Position"),
             "company": (item.get("company") or {}).get("display_name", "Unknown Company"),
             "location": (item.get("location") or {}).get("display_name", ""),
-            "description": (item.get("description", "") or "")[:2000],
+            "description": clean_description(item.get("description")),
             "url": item.get("redirect_url", ""),
             "posted_date": item.get("created", ""),
             "employment_type": item.get("contract_type", "") or "",
@@ -169,7 +171,7 @@ class USAJOBSAPISearcher:
             "title": desc.get("PositionTitle", "Unknown Position"),
             "company": desc.get("OrganizationName", "Unknown Company"),
             "location": desc.get("PositionLocationDisplay", ""),
-            "description": (desc.get("UserArea", {}).get("Details", {}).get("JobSummary", "") or "")[:2000],
+            "description": clean_description(desc.get("UserArea", {}).get("Details", {}).get("JobSummary")),
             "url": desc.get("PositionURI", ""),
             "posted_date": desc.get("PublicationStartDate", ""),
             "employment_type": (desc.get("PositionSchedule") or {}).get("Name", ""),
@@ -214,7 +216,7 @@ class RemoteOKSearcher:
             "title": item.get("position", "Unknown Position"),
             "company": item.get("company", "Unknown Company"),
             "location": "Remote" + (f", {loc}" if loc else ""),
-            "description": (item.get("description", "") or "")[:2000],
+            "description": clean_description(item.get("description")),
             "url": item.get("url", ""),
             "posted_date": item.get("date", ""),
             "employment_type": item.get("contract", "") or "",
@@ -224,9 +226,43 @@ class RemoteOKSearcher:
         }
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_BLOCK_TAG_RE = re.compile(r"</?(p|br|li|ul|ol|h[1-6]|div|tr)\b[^>]*>", re.I)
+# A UTF-8 multi-byte sequence mis-decoded as Latin-1/cp1252: lead byte
+# U+00C2..U+00F4 followed by 1-3 continuation chars U+0080..U+00BF.
+_MOJIBAKE_RE = re.compile(r"[\u00c2-\u00f4][\u0080-\u00bf]{1,3}")
+
+
+def _fix_mojibake(text: str) -> str:
+    def repl(m):
+        try:
+            return m.group(0).encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return m.group(0)
+    return _MOJIBAKE_RE.sub(repl, text)
+
+
+def clean_description(raw: Optional[str], max_chars: int = 2000) -> str:
+    """Provider descriptions arrive as HTML (RemoteOK also double-encodes
+    UTF-8). Store plain text: it is shown in the UI and sent to the LLM, where
+    markup only burns tokens against Groq's per-minute limit."""
+    if not raw:
+        return ""
+    text = _fix_mojibake(raw)
+    text = _BLOCK_TAG_RE.sub("\n", text)
+    text = _TAG_RE.sub("", text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t\u00a0]+", " ", text)
+    text = re.sub(r"\s*\n\s*", "\n", text).strip()
+    return text[:max_chars]
+
+
 def _salary_range(mn, mx, prefix: str = "") -> str:
-    mn_s = f"{prefix}{mn}" if mn not in (None, "") else ""
-    mx_s = f"{prefix}{mx}" if mx not in (None, "") else ""
+    # Providers (RemoteOK) send 0 for "not disclosed" — rendered as "$0 - $0".
+    def _present(v):
+        return v not in (None, "") and str(v).strip() not in ("0", "0.0")
+    mn_s = f"{prefix}{mn}" if _present(mn) else ""
+    mx_s = f"{prefix}{mx}" if _present(mx) else ""
     if mn_s or mx_s:
         return f"{mn_s} - {mx_s}".strip(" -")
     return ""
@@ -285,10 +321,16 @@ def _dedupe_and_rank(jobs: List[Dict], query: str, limit: int, sources: List[str
     scored: List[tuple] = []
     for job in jobs:
         url = job.get("url", "") or ""
-        if url and url in seen:
+        # Same posting is often listed twice under different URLs (seen live
+        # on RemoteOK), so also dedupe on normalised title+company.
+        tc = (" ".join((job.get("title") or "").lower().split()),
+              " ".join((job.get("company") or "").lower().split()))
+        if (url and url in seen) or (all(tc) and tc in seen):
             continue
         if url:
             seen.add(url)
+        if all(tc):
+            seen.add(tc)
         if q_words:
             hay = f"{job.get('title','')} {job.get('description','')} {job.get('company','')}".lower()
             s = sum(1 for w in q_words if w in hay)

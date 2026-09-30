@@ -316,7 +316,7 @@ with tab_settings:
     groq_key = st.text_input("Groq API Key", value=st.session_state["groq_api_key"], type="password")
     model_opt = st.selectbox(
         "LLM Model Name",
-        ["llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "openai/gpt-oss-120b"],
+        ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"],
         index=0,
     )
 

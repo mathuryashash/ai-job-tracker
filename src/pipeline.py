@@ -94,14 +94,52 @@ def _get_end():
 from . import config  # noqa: E402  (intentional late import for testability)
 
 
-def get_llm(api_key: Optional[str] = None, timeout: Optional[int] = None):
+class LLMConfigError(RuntimeError):
+    """Groq rejected the request for a reason no retry can fix (bad/revoked
+    key, unknown/retired model). Must abort the analysis instead of being
+    swallowed into a "successful" result full of error strings."""
+
+
+def _is_fatal_llm_error(exc: BaseException) -> bool:
+    try:
+        import groq
+    except ImportError:  # pragma: no cover
+        return False
+    return isinstance(exc, (groq.AuthenticationError, groq.PermissionDeniedError,
+                            groq.NotFoundError))
+
+
+def _raise_if_fatal(exc: BaseException) -> None:
+    if _is_fatal_llm_error(exc):
+        status = getattr(exc, "status_code", "?")
+        if status == 401:
+            msg = "Groq rejected the API key (401). Check the key in Settings."
+        elif status == 404:
+            msg = (f"Groq model '{current_model()}' is not available (404). "
+                   "Set GROQ_MODEL or pick another model in Settings.")
+        else:
+            msg = f"Groq refused the request ({status})."
+        raise LLMConfigError(msg) from exc
+
+
+def current_model() -> str:
+    """Effective Groq model: Settings (user_config) > GROQ_MODEL env > default."""
+    try:
+        saved = db.get_config("groq_model")
+    except Exception:
+        saved = None
+    return saved or os.getenv("GROQ_MODEL") or config.GROQ_MODEL
+
+
+def get_llm(api_key: Optional[str] = None, timeout: Optional[int] = None,
+            model: Optional[str] = None):
     """Get LLM with configurable timeout to prevent hanging requests."""
     key = api_key or os.getenv("GROQ_API_KEY") or config.GROQ_API_KEY
     if not key:
         raise ValueError("GROQ_API_KEY is not set.")
     ChatGroq = _get_chat_groq()
     return ChatGroq(
-        model=config.GROQ_MODEL,
+        model=model or current_model(),
         temperature=0.2,
         groq_api_key=key,
         timeout=timeout or config.LLM_TIMEOUT_SECONDS,
@@ -149,6 +187,10 @@ class PipelineState(TypedDict, total=False):
     optimized_resume_latex: Optional[str]
     target_role: Optional[str]
     groq_api_key: Optional[str]
+    # Human-readable notes for generation branches that failed (e.g. 429).
+    # Failed outputs are left empty instead of holding the error text, so an
+    # error message is never saved or shown as if it were a cover letter.
+    warnings: Optional[List[str]]
 
 
 class ResumeKeywords(BaseModel):
@@ -237,6 +279,7 @@ def load_resume_node(state: PipelineState) -> PipelineState:
         candidate_email = profile.get("email", "") or ""
         candidate_phone = profile.get("phone", "") or ""
     except Exception as e:
+        _raise_if_fatal(e)  # abort before db.save_resume → no orphan row
         logger.warning("LLM profile extraction failed, falling back to heuristics: %s", e)
         candidate_name = _heuristic_candidate_name(text) or ""
 
@@ -308,6 +351,7 @@ def extract_keywords_node(state: PipelineState) -> PipelineState:
         result = chain.invoke({"resume_text": resume_text[:6000]})
         extracted = result.get("keywords", [])
     except Exception as e:
+        _raise_if_fatal(e)
         logger.error("Error extracting keywords: %s", e)
         extracted = []
 
@@ -358,6 +402,7 @@ def calculate_rag_alignment_node(state: PipelineState) -> PipelineState:
         missing = analysis.get("missing_keywords", []) or []
         final_score = round((semantic_score * 0.4) + (llm_score * 0.6), 1)
     except Exception as e:
+        _raise_if_fatal(e)
         logger.error("Error calculating alignment: %s", e)
         final_score = round(semantic_score, 1)
         missing = []
@@ -366,6 +411,58 @@ def calculate_rag_alignment_node(state: PipelineState) -> PipelineState:
 
 
 # ── Parallel downstream branch (cover letter + optimized resume + role) ─────
+
+# Live run: the original "address gaps honestly" prompt produced invented
+# facts (courses "already enrolled in", Flask services, hospital volunteering).
+COVER_LETTER_SYSTEM_PROMPT = (
+    "You are a professional career coach. Write a tailored 3-4 paragraph cover letter "
+    "using the candidate's name. Sign off with the candidate's name. Use [Company] if "
+    "company unknown.\n"
+    "FACTUAL RULES: use ONLY experience, employers, numbers, skills and education that "
+    "appear in the resume. Never invent courses, certifications, side projects, "
+    "volunteer work, tools or technologies the resume does not mention. For skill gaps, "
+    "acknowledge them briefly and point to related experience that IS in the resume; "
+    "do not claim to be learning or to have used them. If the role is far outside the "
+    "candidate's field, say so plainly rather than stretching the experience."
+)
+
+
+OPTIMIZED_RESUME_SYSTEM_PROMPT = (
+    "You are an expert resume writer. Rewrite the resume to maximise ATS match for the JD.\n"
+    "STRICT CONSTRAINT: Final LaTeX resume MUST fit on EXACTLY ONE A4 page.\n"
+    "Rules: naturally incorporate missing keywords where truthful; mirror JD language; never fabricate; "
+    "be extremely concise (2-3 bullets/role, 1 line/bullet); merge older low-relevance roles; "
+    "compact LaTeX with \\documentclass[10pt]{article}, \\usepackage[margin=0.5in]{geometry}, 10pt font; "
+    "reduce spacing with \\setlength{\\parskip}{0pt}, \\setlength{\\itemsep}{1pt}, \\vspace{-4pt}; "
+    "include Header (single line), Professional Summary (2 lines max), Experience, Education, Skills (single line); "
+    "use \\section*{}, \\subsection*{}, \\textbf{}, \\begin{itemize}[leftmargin=*, nosep]; "
+    "escape LaTeX specials (&, %, $, #, _, {, }, ~, ^, \\\\); "
+    "output ONLY the LaTeX code, no markdown."
+)
+
+
+class _BranchFailed(Exception):
+    """A non-fatal generation branch failed; message is user-facing."""
+
+
+def _short_error(exc: BaseException) -> str:
+    try:
+        import groq
+        if isinstance(exc, groq.RateLimitError):
+            return "Groq rate limit reached (429); retry in a minute."
+    except ImportError:  # pragma: no cover
+        pass
+    return str(exc)[:200]
+
+
+def is_rate_limit_warning(msg: str) -> bool:
+    return "rate limit" in (msg or "").lower()
+
+
+def _escape_braces(text: str) -> str:
+    """Make literal text safe for an f-string ChatPromptTemplate."""
+    return text.replace("{", "{{").replace("}", "}}")
+
 
 def parallel_outputs_node(state: PipelineState) -> PipelineState:
     """Run the three independent LLM branches concurrently using a thread pool.
@@ -377,7 +474,7 @@ def parallel_outputs_node(state: PipelineState) -> PipelineState:
     def _cover_letter() -> str:
         ChatPromptTemplate = _get_chat_prompt_template()
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are a professional career coach. Write a tailored 3-4 paragraph cover letter using the candidate's name and addressing skill gaps honestly. Sign off with the candidate's name. Use [Company] if company unknown."),
+            ("system", COVER_LETTER_SYSTEM_PROMPT),
             ("human", "Candidate Name: {name}\n\nResume:\n{resume}\n\nJD:\n{jd}\n\nGaps:\n{gaps}"),
         ])
         chain = prompt | get_llm(state.get("groq_api_key"))
@@ -390,24 +487,17 @@ def parallel_outputs_node(state: PipelineState) -> PipelineState:
             })
             return res.content
         except Exception as e:
+            _raise_if_fatal(e)
             logger.error("Cover letter generation failed: %s", e)
-            return f"Cover letter generation failed: {str(e)[:200]}"
+            raise _BranchFailed(f"Cover letter generation failed: {_short_error(e)}") from e
 
     def _optimized_resume() -> str:
         ChatPromptTemplate = _get_chat_prompt_template()
         prompt = ChatPromptTemplate.from_messages([
-            ("system", (
-                "You are an expert resume writer. Rewrite the resume to maximise ATS match for the JD.\n"
-                "STRICT CONSTRAINT: Final LaTeX resume MUST fit on EXACTLY ONE A4 page.\n"
-                "Rules: naturally incorporate missing keywords where truthful; mirror JD language; never fabricate; "
-                "be extremely concise (2-3 bullets/role, 1 line/bullet); merge older low-relevance roles; "
-                "compact LaTeX with \\documentclass[10pt]{article}, \\usepackage[margin=0.5in]{geometry}, 10pt font; "
-                "reduce spacing with \\setlength{\\parskip}{0pt}, \\setlength{\\itemsep}{1pt}, \\vspace{-4pt}; "
-                "include Header (single line), Professional Summary (2 lines max), Experience, Education, Skills (single line); "
-                "use \\section*{}, \\subsection*{}, \\textbf{}, \\begin{itemize}[leftmargin=*, nosep]; "
-                "escape LaTeX specials (&, %, $, #, _, {, }, ~, ^, \\\\); "
-                "output ONLY the LaTeX code, no markdown."
-            )),
+            # The instructions contain literal LaTeX braces ({article}, {}),
+            # which ChatPromptTemplate would parse as template variables and
+            # fail every call — escape them.
+            ("system", _escape_braces(OPTIMIZED_RESUME_SYSTEM_PROMPT)),
             ("human", "ORIGINAL RESUME:\n{resume}\n\nJOB DESCRIPTION:\n{jd}\n\nKEYWORDS TO INCORPORATE WHERE RELEVANT:\n{keywords}\n\nWrite the ONE-PAGE ATS-optimized resume in LaTeX:"),
         ])
         chain = prompt | get_llm(state.get("groq_api_key"), timeout=45)
@@ -419,8 +509,9 @@ def parallel_outputs_node(state: PipelineState) -> PipelineState:
             })
             return res.content
         except Exception as e:
+            _raise_if_fatal(e)
             logger.error("Optimized resume generation failed: %s", e)
-            return f"% Optimized resume generation failed: {str(e)[:200]}"
+            raise _BranchFailed(f"Optimized resume generation failed: {_short_error(e)}") from e
 
     def _target_role() -> str:
         ChatPromptTemplate = _get_chat_prompt_template()
@@ -436,19 +527,30 @@ def parallel_outputs_node(state: PipelineState) -> PipelineState:
             })
             return res.content.strip()
         except Exception as e:
+            _raise_if_fatal(e)
             logger.error("Target role detection failed: %s", e)
             return "Software Engineer"
+
+    warnings: List[str] = list(state.get("warnings") or [])
+
+    def _collect(fut, timeout):
+        try:
+            return fut.result(timeout=timeout)
+        except _BranchFailed as e:
+            warnings.append(str(e))
+            return ""
 
     with ThreadPoolExecutor(max_workers=3, thread_name_prefix="llm-branch") as ex:
         fut_cover = ex.submit(_cover_letter)
         fut_opt = ex.submit(_optimized_resume)
         fut_role = ex.submit(_target_role)
-        cover_letter = fut_cover.result(timeout=60)
-        optimized_latex = fut_opt.result(timeout=60)
+        cover_letter = _collect(fut_cover, 60)
+        optimized_latex = _collect(fut_opt, 60)
         target_role = fut_role.result(timeout=30)
 
     return {
         **state,
+        "warnings": warnings,
         "cover_letter": cover_letter,
         "optimized_resume_latex": optimized_latex,
         "optimized_resume": optimized_latex,  # backwards-compat alias
@@ -501,6 +603,7 @@ def _initial_state(resume_path: str, filename: str, job_description: str,
         candidate_phone=None, extracted_keywords=[], match_score=0.0,
         missing_keywords=[], cover_letter="", optimized_resume="",
         optimized_resume_latex="", target_role="", groq_api_key=groq_api_key,
+        warnings=[],
     )
 
 

@@ -337,7 +337,7 @@ def get_saved_jobs() -> list:
                 SELECT id, title, company, location, description, url, platform,
                        employment_type, salary, posted_date,
                        ats_score, missing_keywords, cover_letter, optimized_resume,
-                       created_at
+                       optimized_resume_latex, created_at
                 FROM saved_jobs
                 ORDER BY created_at DESC;
             """)

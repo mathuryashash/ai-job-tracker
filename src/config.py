@@ -17,8 +17,11 @@ def _split_csv(value: str, default: List[str]) -> List[str]:
 # ── LLM ──────────────────────────────────────────────────────────────────────
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 # Default model — must exist on Groq and support tool-free JSON output.
-# Override via env var. Used by pipeline.py and main.py.
-GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+# The Llama 3.x models Groq used to host are retired (404 model_not_found),
+# so default to a currently served model. Override via GROQ_MODEL env var or
+# per-install via Settings (stored as user_config "groq_model").
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+GROQ_MODEL: str = os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
 LLM_TIMEOUT_SECONDS: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
 
 # ── HTTP / Server ────────────────────────────────────────────────────────────

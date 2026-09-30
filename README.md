@@ -45,7 +45,7 @@ Copy `.env.example` to `.env` and fill in:
 |----------|-------------|
 | `DATABASE_URL` | PostgreSQL connection string |
 | `GROQ_API_KEY` | Groq API key for LLM calls |
-| `GROQ_MODEL` | Groq model name (default: `llama-3.3-70b-versatile`) |
+| `GROQ_MODEL` | Groq model name (default: `openai/gpt-oss-120b`; also selectable in Settings) |
 | `APIFY_TOKEN` | Apify token for LinkedIn/Indeed/Glassdoor job search |
 | `TINYFISH_API_KEY` | Tinyfish API key for job search |
 | `BACKEND_HOST` / `BACKEND_PORT` | FastAPI host/port (default `0.0.0.0:8000`) |

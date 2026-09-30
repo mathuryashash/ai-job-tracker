@@ -140,7 +140,7 @@ export default function Dashboard({ setView }: { setView: (v: string) => void })
               <span className="status-dot" style={!health ? { background: '#ef4444', boxShadow: '0 0 8px #ef4444' } : {}} />
               {health ? `API: ${health.service} · DB: ${health.database}` : 'API Offline'}
             </div>
-            {health && <div className="mt-8">Model: {health.groq_model || 'llama-3.3-70b-versatile'}</div>}
+            {health && <div className="mt-8">Model: {health.groq_model || 'unknown'}</div>}
           </div>
         </div>
       </div>

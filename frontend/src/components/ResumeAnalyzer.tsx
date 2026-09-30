@@ -57,8 +57,12 @@ export default function ResumeAnalyzer({ setView }: { setView?: (v: string) => v
   useEffect(() => { saveFormData(jd, file?.name); }, [jd, file]);
 
   useEffect(() => {
-    const hasKey = !!(sessionStorage.getItem('groq_api_key') || localStorage.getItem('health_known'));
-    setApiKeyMissing(!hasKey);
+    // A key saved server-side (Settings → encrypted user_config) or set via
+    // GROQ_API_KEY is reported by /health; a tab-local key also counts.
+    if (sessionStorage.getItem('groq_api_key')) { setApiKeyMissing(false); return; }
+    api.health()
+      .then((h: any) => setApiKeyMissing(!h?.keys_configured?.groq))
+      .catch(() => setApiKeyMissing(false)); // offline banner is shown elsewhere
   }, []);
 
   // Pre-fill the JD form from previous analysis (small pointer only).
@@ -83,6 +87,7 @@ export default function ResumeAnalyzer({ setView }: { setView?: (v: string) => v
     try {
       const data = await api.analyze(file, jd);
       setResults(data);
+      for (const w of data.warnings || []) showToast(w, 'error');
       saveResultPointer(
         data.resume_id,
         data.match_score,
@@ -93,7 +98,7 @@ export default function ResumeAnalyzer({ setView }: { setView?: (v: string) => v
     } catch (e: any) {
       const msg = e.message || 'Analysis failed';
       if (/401|Unauthorized|Invalid API Key/i.test(msg)) {
-        setApiKeyMissing(true);
+        // The key IS configured, just rejected — don't also claim it's missing.
         showToast('Invalid Groq API key. Update it in Settings.', 'error');
         setError('Invalid Groq API key. Please update it in Settings.');
       } else {

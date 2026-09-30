@@ -24,7 +24,14 @@ function jsonHeaders(extra: Record<string, string> = {}): Record<string, string>
 async function handleResponse<T = any>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    // FastAPI errors are {"detail": "..."}; surface the message, not raw JSON.
+    let msg = text;
+    try {
+      const d = JSON.parse(text)?.detail;
+      if (typeof d === 'string') msg = d;
+      else if (Array.isArray(d)) msg = d.map((x: any) => x?.msg).filter(Boolean).join('; ') || text;
+    } catch {}
+    throw new Error(msg || `HTTP ${res.status}`);
   }
   return res.json();
 }
@@ -106,8 +113,8 @@ export async function batchAnalyzeJobs({ resumeId, groqApiKey }: { resumeId: num
   return res.json();
 }
 
-export async function saveKeys({ groqApiKey, apifyToken, tinyfishApiKey }: {
-  groqApiKey?: string; apifyToken?: string; tinyfishApiKey?: string;
+export async function saveKeys({ groqApiKey, apifyToken, tinyfishApiKey, groqModel }: {
+  groqApiKey?: string; apifyToken?: string; tinyfishApiKey?: string; groqModel?: string;
 }) {
   const res = await fetch(`${BASE}/api/keys`, {
     method: 'POST',
@@ -116,6 +123,7 @@ export async function saveKeys({ groqApiKey, apifyToken, tinyfishApiKey }: {
       groq_api_key: groqApiKey || undefined,
       apify_token: apifyToken || undefined,
       tinyfish_api_key: tinyfishApiKey || undefined,
+      groq_model: groqModel || undefined,
     }),
   });
   if (!res.ok) throw new Error(`Failed to save keys: ${res.status}`);

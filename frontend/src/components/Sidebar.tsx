@@ -11,7 +11,7 @@ export default function Sidebar({ active, setActive, health }) {
     <aside className="sidebar">
       <div className="sidebar-logo">
         <div className="sidebar-logo-text">AI Job Tracker</div>
-        <div className="sidebar-logo-sub">Powered by Groq · Llama 70B</div>
+        <div className="sidebar-logo-sub">Powered by Groq</div>
       </div>
 
       <nav className="sidebar-nav">

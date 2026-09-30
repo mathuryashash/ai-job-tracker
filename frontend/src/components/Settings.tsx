@@ -3,16 +3,17 @@ import { api, saveKeys, setSessionKey } from '../api/client';
 import { useToast } from './Toast';
 
 // Models must match what backend config.py + job_search.py expect.
+// Llama 3.x models are retired on Groq (404 model_not_found).
 const MODEL_OPTIONS = [
-  'llama-3.3-70b-versatile',
-  'llama-3.1-70b-versatile',
   'openai/gpt-oss-120b',
+  'openai/gpt-oss-20b',
+  'qwen/qwen3.8-27b',
 ];
 
 export default function Settings() {
   const showToast = useToast();
   const [groqKey, setGroqKey] = useState(() => sessionStorage.getItem('groq_api_key') || '');
-  const [model, setModel] = useState(() => sessionStorage.getItem('groq_model') || 'llama-3.3-70b-versatile');
+  const [model, setModel] = useState(() => sessionStorage.getItem('groq_model') || MODEL_OPTIONS[0]);
   const [apifyToken, setApifyToken] = useState(() => sessionStorage.getItem('apify_token') || '');
   const [tinyfishKey, setTinyfishKey] = useState(() => sessionStorage.getItem('tinyfish_api_key') || '');
   const [message, setMessage] = useState({ text: '', type: '' });
@@ -23,6 +24,8 @@ export default function Settings() {
     api.getKeysFromBackend?.()
       .then((data: any) => {
         if (!data) return;
+        // Show the model the backend will actually use (Settings > env > default).
+        if (data.groq_model) setModel(data.groq_model);
         setMessage({
           text: data.keys_configured
             ? `Keys configured: groq=${data.keys_configured.groq}, apify=${data.keys_configured.apify}, tinyfish=${data.keys_configured.tinyfish}`
@@ -41,6 +44,7 @@ export default function Settings() {
         groqApiKey: groqKey || undefined,
         apifyToken: apifyToken || undefined,
         tinyfishApiKey: tinyfishKey || undefined,
+        groqModel: model,
       });
       // Mirror to sessionStorage so same-tab requests carry the header.
       // localStorage is intentionally NOT used (XSS exposure).
@@ -88,7 +92,7 @@ export default function Settings() {
             <div className="form-group">
               <label>LLM Model</label>
               <select value={model} onChange={(e) => setModel(e.target.value)}>
-                {MODEL_OPTIONS.map((m) => (
+                {(MODEL_OPTIONS.includes(model) ? MODEL_OPTIONS : [model, ...MODEL_OPTIONS]).map((m) => (
                   <option key={m} value={m}>{m}</option>
                 ))}
               </select>

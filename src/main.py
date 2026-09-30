@@ -119,7 +119,7 @@ async def health_check():
         "service": "AI Resume & Job Tracker API",
         "version": app.version,
         "database": db_status,
-        "groq_model": os.getenv("GROQ_MODEL", config.GROQ_MODEL),
+        "groq_model": pipeline.current_model(),
         "encryption_enabled": _encryption_enabled(),
         "keys_configured": {"groq": groq, "apify": apify, "tinyfish": tinyfish},
     }
@@ -147,6 +147,7 @@ class ApplicationUpdateStatus(BaseModel):
 
 class KeysPayload(BaseModel):
     groq_api_key: Optional[str] = None
+    groq_model: Optional[str] = None
     apify_token: Optional[str] = None
     tinyfish_api_key: Optional[str] = None
 
@@ -175,6 +176,8 @@ class BatchAnalyzeRequest(BaseModel):
     groq_api_key: Optional[str] = None
 
 
+BATCH_RATE_LIMIT_BACKOFF_S = float(os.getenv("BATCH_RATE_LIMIT_BACKOFF_S", "30"))
+
 VALID_STATUSES = ["todo", "applied", "interviewing", "offer", "rejected"]
 
 
@@ -191,6 +194,10 @@ async def save_keys(payload: KeysPayload):
         count += 1
     if payload.tinyfish_api_key and payload.tinyfish_api_key.strip():
         db.save_config("tinyfish_api_key", payload.tinyfish_api_key.strip())
+        count += 1
+    if payload.groq_model and payload.groq_model.strip():
+        # Not a secret; read back by pipeline.current_model().
+        db.save_config("groq_model", payload.groq_model.strip())
         count += 1
     return {"saved": True, "keys_updated": count}
 
@@ -210,6 +217,7 @@ async def get_keys():
         "groq_api_key": mask(groq),
         "apify_token": mask(apify),
         "tinyfish_api_key": mask(tinyfish),
+        "groq_model": pipeline.current_model(),
         "keys_configured": {
             "groq": bool(groq or os.getenv("GROQ_API_KEY")),
             "apify": bool(apify or os.getenv("APIFY_TOKEN")),
@@ -252,6 +260,16 @@ async def analyze_resume(
         raise HTTPException(
             status_code=400,
             detail="Groq API key not configured. Add it in Settings or set GROQ_API_KEY.",
+        )
+
+    # A scanned/image-only or corrupt PDF has no extractable text: without
+    # this check the LLM is paid to "analyse" nothing and returns a generic
+    # placeholder cover letter with a near-zero score (seen live).
+    if not _pdf_has_text(contents):
+        raise HTTPException(
+            status_code=422,
+            detail="No text could be extracted from this PDF (scanned image or corrupt?). "
+                   "Upload a text-based PDF.",
         )
 
     # B4: write to a sanitized tempfile, not the project dir + user-supplied name.
@@ -299,10 +317,16 @@ async def analyze_resume(
             "candidate_email": result.get("candidate_email", ""),
             "candidate_phone": result.get("candidate_phone", ""),
             "target_role": result.get("target_role", ""),
+            "warnings": result.get("warnings", []),
             "matched_jobs": [],
         }
     except HTTPException:
         raise
+    except pipeline.LLMConfigError as e:
+        # Bad key / retired model: no retry helps, and returning 200 with
+        # "generation failed" strings in place of results misleads the user.
+        logger.error("Analyse aborted: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception("Pipeline error")
         raise HTTPException(status_code=500, detail=f"Pipeline error: {e}")
@@ -311,6 +335,16 @@ async def analyze_resume(
             os.remove(temp_path)
         except OSError:
             pass
+
+
+def _pdf_has_text(contents: bytes) -> bool:
+    import io
+    import pypdf
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(contents))
+        return any((page.extract_text() or "").strip() for page in reader.pages)
+    except Exception:
+        return False
 
 
 async def _run_pipeline_with_cancel(request: Request, temp_path: str,
@@ -470,21 +504,35 @@ async def analyze_batch(request: BatchAnalyzeRequest, background_tasks: Backgrou
     async def process_jobs():
         processed = errors = 0
         loop = asyncio.get_running_loop()
+        run_one = functools.partial(
+            pipeline.run_batch_pipeline,
+            resume_id=resume["id"],
+            resume_text=resume["extracted_text"],
+            groq_api_key=groq_key,
+        )
         for job in jobs_with_jd:
             try:
                 # The LangGraph pipeline is synchronous (LLM + embedding calls);
                 # run it in the default executor so the event loop keeps
                 # serving other requests while the batch runs.
                 result = await loop.run_in_executor(
-                    None,
-                    functools.partial(
-                        pipeline.run_batch_pipeline,
-                        resume_id=resume["id"],
-                        resume_text=resume["extracted_text"],
-                        job_description=job["description"],
-                        groq_api_key=groq_key,
-                    ),
-                )
+                    None, functools.partial(run_one, job_description=job["description"]))
+                if any(pipeline.is_rate_limit_warning(w) for w in result.get("warnings") or []):
+                    # Groq free tier is tokens-per-minute limited; each job is
+                    # ~5 LLM calls. Let the window roll over, retry once.
+                    logger.warning("Batch: rate limited on job %s; backing off %ss",
+                                   job["id"], BATCH_RATE_LIMIT_BACKOFF_S)
+                    await asyncio.sleep(BATCH_RATE_LIMIT_BACKOFF_S)
+                    first = result
+                    result = await loop.run_in_executor(
+                        None, functools.partial(run_one, job_description=job["description"]))
+                    # Keep whatever the first attempt did produce if the retry
+                    # was rate limited on a different branch.
+                    for k in ("cover_letter", "optimized_resume", "optimized_resume_latex"):
+                        if not result.get(k) and first.get(k):
+                            result[k] = first[k]
+                for w in result.get("warnings") or []:
+                    logger.warning("Batch: job %s: %s", job["id"], w)
                 db.update_job_analysis(
                     job_id=job["id"],
                     ats_score=result.get("match_score", 0.0),
@@ -496,6 +544,12 @@ async def analyze_batch(request: BatchAnalyzeRequest, background_tasks: Backgrou
                 processed += 1
                 logger.info("Batch: processed job %s (%s) score=%s",
                             job["id"], job.get("title", "?"), result.get("match_score"))
+            except pipeline.LLMConfigError as e:
+                # Same failure for every remaining job — stop instead of
+                # burning N doomed requests.
+                errors += 1
+                logger.error("Batch aborted at job %s: %s", job["id"], e)
+                break
             except Exception as e:
                 errors += 1
                 logger.error("Batch: failed job %s: %s", job["id"], e)
