@@ -1,5 +1,17 @@
 # AI Resume & Job Tracker
 
+## Hybrid RAG + LangGraph agent (new)
+
+The tracker now grounds everything it writes in retrieved resume evidence and includes a tool-using agent. Commands and raw output are in [VERIFY.md](VERIFY.md).
+
+- **Hybrid retrieval:** BM25 + pgvector dense search, Reciprocal Rank Fusion, cross-encoder rerank. On 39 labelled requirements: recall@3 1.0, MRR 0.969.
+- **Cited, evidence-gated generation:** cover letters cite chunk ids; requirements without evidence are listed as gaps, never claimed. On a 50-case eval harness, claim faithfulness rose 0.72 -> 0.90 and prompt-injection resistance 1/5 -> 5/5.
+- **LangGraph agent** (`python -m src.agent "find remote python backend jobs and shortlist the best 3"`): 5 typed tools (search, fetch, analyze_fit, tailor_bullets, save_to_tracker), retries with backoff, reflection, step budget, SQLite checkpoints, and a human-in-the-loop interrupt before any write. Streaming API at `/api/agent/run` and `/api/agent/resume`.
+- **Trajectory evals:** 27/29 tasks passed on fresh runs, 0 writes without approval (including 3 prompt-injection job posts), 3/3 live searches.
+
+Caveats: small, partly synthetic eval sets; most agent runs used Gemini flash-lite because the Groq daily limit was reached.
+
+
 An AI-powered application that analyzes resumes against job descriptions, generates tailored cover letters, searches live job postings, and tracks applications through a Kanban pipeline.
 
 ## Features
