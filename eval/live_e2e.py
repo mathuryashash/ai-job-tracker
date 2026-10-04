@@ -24,6 +24,14 @@ for line in open(os.path.join(ROOT, ".hermes-qa", "sandbox.env"), encoding="utf-
 env["DATABASE_URL"] = os.getenv("E2E_DATABASE_URL", "postgresql://postgres@127.0.0.1:5544/jobtracker_rag")
 env.setdefault("HF_HOME", "D:/hf-cache")
 env["HF_HUB_OFFLINE"] = "1"
+# Optional: GROQ key from another local env file (e.g. when the sandbox key's
+# daily token quota is exhausted). Value is never printed.
+if os.getenv("E2E_GROQ_ENV"):
+    for line in open(os.environ["E2E_GROQ_ENV"], encoding="utf-8"):
+        if line.startswith("GROQ_API_KEY="):
+            env["GROQ_API_KEY"] = line.split("=", 1)[1].strip().strip('"')
+if os.getenv("E2E_GROQ_MODEL"):
+    env["GROQ_MODEL"] = os.environ["E2E_GROQ_MODEL"]
 key = env["GROQ_API_KEY"]
 
 log = open(os.path.join(ROOT, "eval", "results", "live_backend.log"), "w", encoding="utf-8")
@@ -33,12 +41,12 @@ try:
     base = f"http://127.0.0.1:{PORT}"
     for _ in range(120):
         try:
-            if requests.get(base + "/api/health", timeout=2).ok:
+            if requests.get(base + "/health", timeout=2).ok:
                 break
         except requests.RequestException:
             pass
         time.sleep(1)
-    health = requests.get(base + "/api/health", timeout=5).json()
+    health = requests.get(base + "/health", timeout=5).json()
     jd = open(os.path.join(ROOT, "eval", "fixtures", "jd_backend.txt"), encoding="utf-8").read()
     t0 = time.perf_counter()
     r = requests.post(base + "/api/analyze",

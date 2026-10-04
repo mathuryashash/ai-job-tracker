@@ -1,0 +1,270 @@
+{
+ "health": {
+  "status": "healthy",
+  "service": "AI Resume & Job Tracker API",
+  "version": "2.0.0",
+  "database": "connected",
+  "groq_model": "openai/gpt-oss-20b",
+  "encryption_enabled": true,
+  "keys_configured": {
+   "groq": true,
+   "apify": false,
+   "tinyfish": false
+  }
+ },
+ "status": 200,
+ "latency_s": 12.9,
+ "response": {
+  "success": true,
+  "resume_id": 6,
+  "match_score": 81.3,
+  "extracted_keywords": [
+   "Python",
+   "React",
+   "AWS",
+   "Docker",
+   "Kubernetes",
+   "JavaScript",
+   "Node.js",
+   "PostgreSQL",
+   "Git",
+   "CI/CD",
+   "REST APIs",
+   "Microservices",
+   "Leadership",
+   "Team Management",
+   "Software Engineering"
+  ],
+  "missing_keywords": [
+   "FastAPI",
+   "EKS",
+   "RDS",
+   "SQS",
+   "Terraform",
+   "Kafka",
+   "Prometheus",
+   "Grafana"
+  ],
+  "cover_letter": "Dear Hiring Team,\n\nI am excited to apply for the Senior Backend Engineer position at Brightwave Payments. With over five years of professional software engineering experience, I have led the design, build, and operation of high\u2011throughput microservices at TechCorp, handling more than 1\u202fM requests per day [c4, c5, c2]. In my recent role as Senior Software Engineer, I architected services in Python, deployed them on AWS, and containerized them with Docker and Kubernetes, ensuring reliable production workloads [c3, c10].\n\nMy background also includes designing PostgreSQL schemas and developing REST APIs during my tenure at StartupXYZ, where I worked with JavaScript, Node.js, and React to deliver a responsive dashboard [c8, c7, c10]. I have built CI/CD pipelines, managed Git repositories, and maintained cloud infrastructure on AWS, all of which have been applied to production environments [c10, c3]. While I have not yet worked with FastAPI, EKS, RDS, or SQS, I have extensive experience with Python and Kubernetes in production, and I am eager to extend my skill set to these technologies [c3, c10].\n\nBeyond individual contributions, I have mentored a team of five engineers and led technical design reviews, ensuring code quality and architectural consistency [c5, c2]. I am comfortable taking ownership of containerized deployments and continuously improving CI/CD processes, which aligns with Brightwave\u2019s focus on scalable, reliable services [c10, c3].\n\nI am eager to bring my experience in Python, AWS, Docker, Kubernetes, PostgreSQL, and REST API design to Brightwave Payments, and I look forward to discussing how I can help scale your payment platform. Thank you for considering my application.\n\nSincerely,  \nJohn Doe",
+  "optimized_resume": "\\documentclass[10pt]{article}\n\\usepackage[margin=0.5in]{geometry}\n\\usepackage{enumitem}\n\\setlength{\\parskip}{0pt}\n\\setlength{\\itemsep}{1pt}\n\\begin{document}\n\\noindent \\textbf{John Doe} \\hfill Senior Backend Engineer \\hfill john@example.com \\hfill ",
+  "optimized_resume_latex": "\\documentclass[10pt]{article}\n\\usepackage[margin=0.5in]{geometry}\n\\usepackage{enumitem}\n\\setlength{\\parskip}{0pt}\n\\setlength{\\itemsep}{1pt}\n\\begin{document}\n\\noindent \\textbf{John Doe} \\hfill Senior Backend Engineer \\hfill john@example.com \\hfill ",
+  "candidate_name": "John Doe",
+  "candidate_email": "john@example.com",
+  "candidate_phone": "555-1234",
+  "target_role": "Senior Backend Engineer",
+  "warnings": [],
+  "score_reasoning": "The resume provides evidence for all core requirements except the optional Terraform/Kafka/observability stack.  Python microservices, AWS, Docker, Kubernetes, PostgreSQL, REST APIs, React, team leadership, and 5+ years of experience are all supported by chunks [c3], [c4], [c10], [c8], [c7], [c5], [c2], and [c6].  The only gaps are the specific FastAPI framework, EKS, RDS, SQS, Terraform, Kafka, Prometheus, and Grafana, which are not mentioned in any evidence chunk.",
+  "evidence": [
+   {
+    "requirement": "Design, build and operate Python microservices (FastAPI) running on AWS (EKS, RDS, SQS)",
+    "supported": true,
+    "top_score": 0.491,
+    "chunks": [
+     {
+      "id": "c4",
+      "text": "Experience | Senior Software Engineer at TechCorp (2020-2024): Built microservices handling 1M+ requests/day",
+      "rerank": -4.14,
+      "cosine": 0.436
+     },
+     {
+      "id": "c3",
+      "text": "Experience | Senior Software Engineer at TechCorp (2020-2024): Python, React, AWS, Docker, Kubernetes",
+      "rerank": -4.621,
+      "cosine": 0.491
+     },
+     {
+      "id": "c10",
+      "text": "Skills: Python, JavaScript, React, AWS, Docker, Kubernetes, PostgreSQL, Git, CI/CD",
+      "rerank": -5.251,
+      "cosine": 0.379
+     }
+    ]
+   },
+   {
+    "requirement": "Own containerised deployments with Docker and Kubernetes; improve our CI/CD pipelines",
+    "supported": true,
+    "top_score": 0.485,
+    "chunks": [
+     {
+      "id": "c10",
+      "text": "Skills: Python, JavaScript, React, AWS, Docker, Kubernetes, PostgreSQL, Git, CI/CD",
+      "rerank": -3.061,
+      "cosine": 0.413
+     },
+     {
+      "id": "c3",
+      "text": "Experience | Senior Software Engineer at TechCorp (2020-2024): Python, React, AWS, Docker, Kubernetes",
+      "rerank": -5.546,
+      "cosine": 0.485
+     }
+    ]
+   },
+   {
+    "requirement": "Design PostgreSQL schemas and REST APIs consumed by our React dashboard",
+    "supported": true,
+    "top_score": 0.496,
+    "chunks": [
+     {
+      "id": "c8",
+      "text": "Experience | Software Engineer at StartupXYZ (2018-2020): Developed REST APIs",
+      "rerank": -5.877,
+      "cosine": 0.415
+     },
+     {
+      "id": "c10",
+      "text": "Skills: Python, JavaScript, React, AWS, Docker, Kubernetes, PostgreSQL, Git, CI/CD",
+      "rerank": -5.887,
+      "cosine": 0.383
+     },
+     {
+      "id": "c7",
+      "text": "Experience | Software Engineer at StartupXYZ (2018-2020): JavaScript, Node.js, PostgreSQL",
+      "rerank": -7.279,
+      "cosine": 0.496
+     }
+    ]
+   },
+   {
+    "requirement": "Mentor a small team of engineers and lead technical design reviews",
+    "supported": true,
+    "top_score": 0.495,
+    "chunks": [
+     {
+      "id": "c5",
+      "text": "Experience | Senior Software Engineer at TechCorp (2020-2024): Led team of 5 engineers",
+      "rerank": -5.179,
+      "cosine": 0.495
+     },
+     {
+      "id": "c2",
+      "text": "Experience: Senior Software Engineer at TechCorp (2020-2024)",
+      "rerank": -10.694,
+      "cosine": 0.39
+     }
+    ]
+   },
+   {
+    "requirement": "5+ years of professional software engineering experience",
+    "supported": true,
+    "top_score": 0.688,
+    "chunks": [
+     {
+      "id": "c5",
+      "text": "Experience | Senior Software Engineer at TechCorp (2020-2024): Led team of 5 engineers",
+      "rerank": -0.19,
+      "cosine": 0.657
+     },
+     {
+      "id": "c2",
+      "text": "Experience: Senior Software Engineer at TechCorp (2020-2024)",
+      "rerank": -1.566,
+      "cosine": 0.688
+     },
+     {
+      "id": "c6",
+      "text": "Experience: Software Engineer at StartupXYZ (2018-2020)",
+      "rerank": -1.79,
+      "cosine": 0.61
+     }
+    ]
+   },
+   {
+    "requirement": "Strong Python; experience with JavaScript/Node.js is a plus",
+    "supported": true,
+    "top_score": 0.592,
+    "chunks": [
+     {
+      "id": "c7",
+      "text": "Experience | Software Engineer at StartupXYZ (2018-2020): JavaScript, Node.js, PostgreSQL",
+      "rerank": -0.672,
+      "cosine": 0.541
+     },
+     {
+      "id": "c10",
+      "text": "Skills: Python, JavaScript, React, AWS, Docker, Kubernetes, PostgreSQL, Git, CI/CD",
+      "rerank": -5.478,
+      "cosine": 0.592
+     },
+     {
+      "id": "c3",
+      "text": "Experience | Senior Software Engineer at TechCorp (2020-2024): Python, React, AWS, Docker, Kubernetes",
+      "rerank": -7.399,
+      "cosine": 0.519
+     }
+    ]
+   },
+   {
+    "requirement": "Hands-on AWS, Docker and Kubernetes in production",
+    "supported": true,
+    "top_score": 0.646,
+    "chunks": [
+     {
+      "id": "c3",
+      "text": "Experience | Senior Software Engineer at TechCorp (2020-2024): Python, React, AWS, Docker, Kubernetes",
+      "rerank": 0.833,
+      "cosine": 0.646
+     },
+     {
+      "id": "c10",
+      "text": "Skills: Python, JavaScript, React, AWS, Docker, Kubernetes, PostgreSQL, Git, CI/CD",
+      "rerank": 0.76,
+      "cosine": 0.495
+     }
+    ]
+   },
+   {
+    "requirement": "PostgreSQL and REST API design",
+    "supported": true,
+    "top_score": 0.432,
+    "chunks": [
+     {
+      "id": "c8",
+      "text": "Experience | Software Engineer at StartupXYZ (2018-2020): Developed REST APIs",
+      "rerank": -1.823,
+      "cosine": 0.432
+     },
+     {
+      "id": "c7",
+      "text": "Experience | Software Engineer at StartupXYZ (2018-2020): JavaScript, Node.js, PostgreSQL",
+      "rerank": -3.789,
+      "cosine": 0.4
+     }
+    ]
+   },
+   {
+    "requirement": "Terraform, Kafka, observability (Prometheus/Grafana)",
+    "supported": false,
+    "top_score": 0.271,
+    "chunks": []
+   }
+  ],
+  "unsupported_requirements": [
+   "Terraform, Kafka, observability (Prometheus/Grafana)"
+  ],
+  "citation_check": {
+   "cited_ids": [
+    "c4",
+    "c5",
+    "c2",
+    "c3",
+    "c10",
+    "c8",
+    "c7"
+   ],
+   "invalid_ids": [],
+   "cited_chunks": {
+    "c4": "Experience | Senior Software Engineer at TechCorp (2020-2024): Built microservices handling 1M+ requests/day",
+    "c5": "Experience | Senior Software Engineer at TechCorp (2020-2024): Led team of 5 engineers",
+    "c2": "Experience: Senior Software Engineer at TechCorp (2020-2024)",
+    "c3": "Experience | Senior Software Engineer at TechCorp (2020-2024): Python, React, AWS, Docker, Kubernetes",
+    "c10": "Skills: Python, JavaScript, React, AWS, Docker, Kubernetes, PostgreSQL, Git, CI/CD",
+    "c8": "Experience | Software Engineer at StartupXYZ (2018-2020): Developed REST APIs",
+    "c7": "Experience | Software Engineer at StartupXYZ (2018-2020): JavaScript, Node.js, PostgreSQL"
+   }
+  },
+  "retrieval_backend": "pgvector",
+  "injection_removed": [],
+  "letter_guard_removed": [],
+  "matched_jobs": []
+ }
+}

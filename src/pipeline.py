@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from functools import lru_cache
 from typing import List, Optional, TypedDict
 
@@ -668,7 +669,13 @@ def parallel_outputs_node(state: PipelineState) -> PipelineState:
         fut_role = ex.submit(_target_role)
         cover_letter = _collect(fut_cover, 60)
         optimized_latex = _collect(fut_opt, 60)
-        target_role = fut_role.result(timeout=30)
+        try:
+            target_role = fut_role.result(timeout=30)
+        except FuturesTimeout:
+            # Groq 429 retries can outlast the 30s budget; the role is cosmetic,
+            # so fall back instead of failing the whole analysis with a 500.
+            logger.warning("Target role detection timed out; using fallback")
+            target_role = "Software Engineer"
 
     from . import rag
     allowed = rag.evidence_chunks(_evidence_objs(state))

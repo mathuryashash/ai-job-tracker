@@ -219,3 +219,33 @@ def test_cover_letter_refuses_when_nothing_supported(monkeypatch):
     assert pipeline.generate_cover_letter(st) == rag.NO_EVIDENCE_LETTER
     st2 = {"resume_text": "  ", "job_description": "jd", "evidence": []}
     assert pipeline.generate_cover_letter(st2) == rag.NO_EVIDENCE_LETTER
+
+
+def test_target_role_timeout_does_not_fail_analysis(monkeypatch):
+    import concurrent.futures as cf
+    import types
+    from src import pipeline
+
+    class Chain:
+        def __init__(self, n): self.n = n
+        def invoke(self, _):
+            return types.SimpleNamespace(content="x")
+    class Prompt:
+        def __or__(self, llm): return Chain(0)
+    class CPT:
+        @staticmethod
+        def from_messages(m): return Prompt()
+    monkeypatch.setattr(pipeline, "_get_chat_prompt_template", lambda: CPT)
+    monkeypatch.setattr(pipeline, "get_llm", lambda *a, **k: object())
+    real_result = cf.Future.result
+    calls = {"n": 0}
+
+    def result(self, timeout=None):
+        calls["n"] += 1
+        if timeout == 30:
+            raise cf.TimeoutError()
+        return real_result(self, timeout)
+    monkeypatch.setattr(cf.Future, "result", result)
+    out = pipeline.parallel_outputs_node({"resume_text": "cv", "job_description": "jd",
+                                          "missing_keywords": [], "extracted_keywords": [], "candidate_name": "J"})
+    assert out["target_role"] == "Software Engineer"
