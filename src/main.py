@@ -64,6 +64,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="AI Resume & Job Tracker API", version="2.0.0", lifespan=lifespan)
 
+from .agent.api import router as agent_router  # noqa: E402
+app.include_router(agent_router)
+
 
 @app.middleware("http")
 async def enforce_max_content_length(request: Request, call_next):
