@@ -100,6 +100,7 @@ def init_db():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
+                _ensure_chunk_table(cur)
 
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS job_applications (
@@ -204,6 +205,57 @@ def get_resume_embedding(resume_id: int):
             if row and row[0] is not None:
                 return list(row[0])
             return None
+
+
+def _ensure_chunk_table(cur) -> None:
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS resume_chunks (
+            id SERIAL PRIMARY KEY,
+            resume_id INTEGER REFERENCES resumes(id) ON DELETE CASCADE,
+            chunk_id VARCHAR(16) NOT NULL,
+            content TEXT NOT NULL,
+            embedding vector(384) NOT NULL,
+            UNIQUE (resume_id, chunk_id)
+        );
+    """)
+
+
+def pgvector_enabled() -> bool:
+    return _pgvector_available
+
+
+def save_resume_chunks(resume_id: int, chunks, embeddings) -> bool:
+    """Persist (chunk_id, text, embedding) rows for dense retrieval in pgvector.
+    Returns False (caller falls back to in-process search) when unavailable."""
+    if not _pgvector_available:
+        return False
+    import numpy as np
+    with get_connection() as conn:
+        _register_vector(conn)
+        with conn.cursor() as cur:
+            _ensure_chunk_table(cur)
+            cur.execute("DELETE FROM resume_chunks WHERE resume_id = %s;", (resume_id,))
+            for c, e in zip(chunks, embeddings):
+                cur.execute(
+                    "INSERT INTO resume_chunks (resume_id, chunk_id, content, embedding) VALUES (%s, %s, %s, %s);",
+                    (resume_id, c.id, c.text, np.asarray(e, dtype=np.float32)),
+                )
+            conn.commit()
+    return True
+
+
+def search_resume_chunks(resume_id: int, query_embedding, limit: int = 10):
+    """Top-`limit` chunk ids of one resume by pgvector cosine distance (<=>)."""
+    import numpy as np
+    with get_connection() as conn:
+        _register_vector(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT chunk_id FROM resume_chunks WHERE resume_id = %s "
+                "ORDER BY embedding <=> %s LIMIT %s;",
+                (resume_id, np.asarray(query_embedding, dtype=np.float32), limit),
+            )
+            return [r[0] for r in cur.fetchall()]
 
 
 def search_resumes_by_embedding(query_embedding, limit: int = 5):

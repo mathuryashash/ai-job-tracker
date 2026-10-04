@@ -57,3 +57,7 @@ login-snapshot.md
 ruflodashboard.html
 test-keywords.js
 YashashMathur_Updated.pdf
+
+# RAG eval artefacts
+eval/.cache/
+.scratch/

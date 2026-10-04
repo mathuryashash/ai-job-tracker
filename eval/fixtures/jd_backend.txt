@@ -1,0 +1,19 @@
+Senior Backend Engineer
+Company: Brightwave Payments
+Location: Remote (US/EU)
+
+About the role:
+Brightwave is hiring a Senior Backend Engineer to build and scale the microservices behind our payments platform, which processes over 2 million transactions per day.
+
+Responsibilities:
+- Design, build and operate Python microservices (FastAPI) running on AWS (EKS, RDS, SQS)
+- Own containerised deployments with Docker and Kubernetes; improve our CI/CD pipelines
+- Design PostgreSQL schemas and REST APIs consumed by our React dashboard
+- Mentor a small team of engineers and lead technical design reviews
+
+Requirements:
+- 5+ years of professional software engineering experience
+- Strong Python; experience with JavaScript/Node.js is a plus
+- Hands-on AWS, Docker and Kubernetes in production
+- PostgreSQL and REST API design
+- Nice to have: Terraform, Kafka, observability (Prometheus/Grafana)

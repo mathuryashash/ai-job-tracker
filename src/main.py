@@ -318,6 +318,13 @@ async def analyze_resume(
             "candidate_phone": result.get("candidate_phone", ""),
             "target_role": result.get("target_role", ""),
             "warnings": result.get("warnings", []),
+            "score_reasoning": result.get("score_reasoning", ""),
+            "evidence": result.get("evidence", []),
+            "unsupported_requirements": result.get("unsupported_requirements", []),
+            "citation_check": result.get("citation_check", {}),
+            "retrieval_backend": result.get("retrieval_backend", ""),
+            "injection_removed": result.get("injection_removed", []),
+            "letter_guard_removed": result.get("letter_guard_removed", []),
             "matched_jobs": [],
         }
     except HTTPException:

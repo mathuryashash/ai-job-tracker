@@ -1,0 +1,76 @@
+{
+  "n_labelled": 39,
+  "n_with_evidence": 32,
+  "n_unsupported": 7,
+  "metrics": {
+    "bm25": {
+      "recall@1": 0.844,
+      "recall@3": 0.906,
+      "recall@5": 0.906,
+      "mrr@10": 0.87,
+      "ms_per_query": 0.2
+    },
+    "dense": {
+      "recall@1": 0.906,
+      "recall@3": 1.0,
+      "recall@5": 1.0,
+      "mrr@10": 0.953,
+      "ms_per_query": 14.0
+    },
+    "hybrid": {
+      "recall@1": 0.938,
+      "recall@3": 1.0,
+      "recall@5": 1.0,
+      "mrr@10": 0.969,
+      "ms_per_query": 14.4
+    },
+    "hybrid_rerank": {
+      "recall@1": 0.875,
+      "recall@3": 1.0,
+      "recall@5": 1.0,
+      "mrr@10": 0.932,
+      "ms_per_query": 68.3
+    }
+  },
+  "refusal": {
+    "cosine_gate_in_use": {
+      "threshold": 0.36,
+      "accuracy": 0.949,
+      "tp": 30,
+      "tn": 7,
+      "fp": 0,
+      "fn": 2,
+      "leave_one_resume_out_accuracy": 0.923,
+      "sweep": {
+        "0.2": 0.872,
+        "0.22": 0.872,
+        "0.24": 0.846,
+        "0.26": 0.872,
+        "0.28": 0.923,
+        "0.3": 0.923,
+        "0.32": 0.949,
+        "0.34": 0.949,
+        "0.36": 0.949,
+        "0.38": 0.949,
+        "0.4": 0.872,
+        "0.42": 0.821,
+        "0.44": 0.744,
+        "0.46": 0.718,
+        "0.48": 0.641,
+        "0.5": 0.513
+      }
+    },
+    "cross_encoder_gate_rejected": {
+      "best_in_sample_accuracy": 0.872,
+      "leave_one_resume_out_accuracy": 0.769
+    }
+  },
+  "pgvector_parity": {
+    "queries": 32,
+    "identical_top5": 32
+  },
+  "models": {
+    "dense": "all-MiniLM-L6-v2",
+    "reranker": "cross-encoder/ms-marco-MiniLM-L6-v2"
+  }
+}
