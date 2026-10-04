@@ -1,127 +1,131 @@
-# VERIFY — real hybrid RAG + eval harness (branch `hermes/real-rag`)
+# VERIFY — LangGraph job agent (branch `hermes/job-agent`)
 
-Worktree: `D:/ai-build/jobtracker-rag`. Python: `D:/ai-resume-job-tracker/venv` (used by path).
-Env for every command: `HF_HOME=D:/hf-cache HF_HUB_OFFLINE=1`.
+Worktree `D:/ai-build/jobtracker-agent`, based on `hermes/real-rag` (14820a0). The RAG branch's own VERIFY and resume lines are in
+`docs/VERIFY_RAG.md` and `docs/RESUME_LINES_RAG.md`. Python: `D:/ai-resume-job-tracker/venv`. Every command uses `HF_HOME=D:/hf-cache HF_HUB_OFFLINE=1`.
+Keys come from `.hermes-qa/sandbox.env` (gitignored, copied from the RAG worktree) and `AGENT_KEYS_ENV=D:/ascent_hackathon/.env`.
+They are read into memory only, never printed and never committed. One new dependency: `langgraph-checkpoint-sqlite` (installed in the venv).
 
-## What changed
-- `src/rag.py` (new): structure-aware resume chunking (one chunk per bullet, prefixed with section and parent role, ids `c1..cN`),
-  deterministic JD requirement extraction, **BM25** (`rank_bm25`) + **dense** (all-MiniLM-L6-v2) retrieval per requirement,
-  **Reciprocal Rank Fusion** (k=60), **cross-encoder rerank** (`cross-encoder/ms-marco-MiniLM-L6-v2`, cached in D:/hf-cache),
-  an evidence gate (cosine ≥ 0.36 on the reranked top 3) that marks requirements **NOT SUPPORTED BY RESUME**, citation parsing and validation,
-  and guardrails: JD prompt-injection sanitiser, removal of JD text pasted into a resume, and a post-generation letter guard that
-  strips sentences claiming unsupported skills.
-- `src/pipeline.py`: new LangGraph node `retrieve_evidence` (extract_keywords → **retrieve_evidence** → calculate_rag_alignment → parallel_outputs).
-  The alignment prompt now gets each requirement with its cited chunks and returns `reasoning` + score + missing keywords.
-  The cover letter is written **only from retrieved chunks**, must cite `[cN]`, and is refused outright when no requirement has evidence.
-  Invalid citations are flagged in `warnings`. A target-role timeout no longer turns the whole analysis into a 500 (bug found live).
-- `src/db.py`: `resume_chunks(resume_id, chunk_id, content, embedding vector(384))`; dense search runs via pgvector `<=>`.
-  If pgvector is missing, retrieval falls back to an in-process numpy cosine search; `retrieval_backend` in the response says which one ran.
-- `src/main.py`: `/api/analyze` also returns `evidence`, `unsupported_requirements`, `score_reasoning`, `citation_check`, `retrieval_backend`,
-  `injection_removed`, `letter_guard_removed`.
+## What was built (`src/agent/`)
+- `tools.py`: 5 typed tools. Each has a pydantic args model, which is also the JSON schema the LLM sees.
+  - `search_jobs(query, location, remote, limit)`: uses the existing `job_search` module. Recorded RemoteOK fixtures by default; live boards with `--live`.
+  - `fetch_job(url_or_id)`: returns a sanitised description. Live URLs must be https on remoteok/usajobs, and redirects are not followed.
+  - `analyze_fit(job_id)`: reuses the real-RAG `retrieve_evidence_node` (BM25 + dense, RRF, cross-encoder, evidence gate, JD sanitiser)
+    and the pipeline's alignment prompt. Returns a score, the supported requirements with chunk ids, and the gaps.
+  - `tailor_bullets(job_id)`: writes bullets only from retrieved chunks, and every bullet must cite chunk ids. Bullets are dropped if they
+    are uncited, cite a chunk that was not retrieved, or name a skill absent from the cited chunks. Refuses outright when nothing is supported.
+  - `save_to_tracker(job_id, status)`: the only write. Calls `db.save_job_application`, which writes the Kanban `job_applications` table.
 
-## pgvector
-The system PostgreSQL 18 (`C:/Program Files/PostgreSQL/18`) has no pgvector, and its directory needs admin rights (not available).
-I built **pgvector 0.8.1 from source** with MSVC 2022 (`nmake /F Makefile.win`) into a copy of PG18 under `D:/ai-build/pg18`
-and ran a **private PG18 cluster on 127.0.0.1:5544** (`D:/ai-build/pgdata-rag`, DB `jobtracker_rag`, trust auth, local only):
-```
-CREATE EXTENSION vector;  ->  extversion 0.8.1
-```
-The owner's DBs on :5432 were not touched. Without pgvector (e.g. the :5432 sandbox), the app uses the in-process fallback.
+  `run_tool` validates arguments and retries transient failures with exponential backoff (3 attempts). Every failure becomes a structured
+  error: `{"ok": false, "error": {type, message, retryable}}`. A circuit breaker stops calls to a tool after 2 exhausted retries.
+  Fault flags `flaky|down|error_once` inject failures for tests and evals.
+- `graph.py`: a `StateGraph` that loops `agent` (LLM tool calling) → `tools` (custom ToolNode) → `agent`.
+  - Any write tool call is routed to `approval`, which calls `langgraph.types.interrupt()`. The run resumes with `Command(resume={"decision": ...})`.
+  - `reflect` checks the final answer and gives the agent another turn (at most 2). It catches: false "saved" claims, job ids no tool
+    returned, ranking without `analyze_fit`, "best N" with fewer than N analyses, and tailoring without `tailor_bullets`.
+  - A `max_steps` budget ends the run with status `budget_exhausted`. An answer starting "QUESTION:" ends it with `needs_clarification`.
+  - Checkpoints go to SQLite (`SqliteSaver`, `.agent/checkpoints.sqlite`, gitignored).
+  - `save_to_tracker` runs only for tool-call ids the human approved, and the tool itself checks the id again.
+- `llm.py`: an OpenAI-compatible tool-calling client.
+  - Provider chain: Groq `openai/gpt-oss-120b` (2 keys) → NVIDIA NIM → Gemini `gemini-3.5-flash-lite`.
+    NIM is used only if `NVIDIA_API_KEY` is set. **No NIM key exists on this machine, so that path is untested.**
+  - A daily cap (TPD/RPD) retires a key for the rest of the run. Per-minute 429s and 5xx errors get exponential backoff.
+  - Every response is cached on disk.
+- Interfaces:
+  - `__main__.py`: the CLI.
+  - `api.py`: `POST /api/agent/run`, `POST /api/agent/resume` and `GET /api/agent/state/{id}`, streaming NDJSON, mounted in `src/main.py`.
+  - `frontend/src/components/AgentPanel.tsx`: streams the steps and shows Approve/Reject buttons.
 
 ## Tests
 ```
 D:/ai-resume-job-tracker/venv/Scripts/python.exe -m pytest -q -p no:cacheprovider
-87 passed, 1 warning in 17.38s
+117 passed, 1 warning in 42.18s
 ```
-That is the 68 original tests plus 19 new ones in `tests/test_rag.py`: chunking, requirement extraction, RRF, BM25/dense, rerank order,
-refusal, pgvector use + fallback, citation validation, injection sanitiser, JD-paste filter, letter guard, no-evidence refusal,
-role-timeout regression and graph wiring.
-The worktree needed the owner's untracked `src/crypto.py`, 4 test files, `test_resume.pdf` and the modified `tests/test_api.py` to reach
-the 68-test baseline. They were copied in and committed on this branch only; the owner's tree is untouched.
+That is the 87 old tests plus 30 new ones in `tests/test_agent.py`. They cover:
+- **Tools:** typed schemas, fixture search, injection-sanitised snippets, structured errors, flaky→retry, down→retryable error,
+  crash→observation, the circuit breaker, the approval check inside the tool, and the SSRF guard.
+- **RAG tools:** `analyze_fit` evidence and gaps (plus its fallback when the LLM is down); `tailor_bullets` dropping uncited,
+  non-retrieved or unsupported bullets, and refusing outright.
+- **Graph:** happy path, reflection checks, budget exhaustion, tool-failure recovery, clarifying question.
+  Interrupt→approve is resumed from a **new graph object on the same SQLite file** and writes once; reject writes nothing.
+- **LLM client:** Groq TPD→Gemini fallback plus the cache, per-minute 429 retry, keys never appear in error text.
+- **API:** stream, pause, resume, 409 on a replayed approval, input validation.
 
-## 1. Retrieval eval — `python -m eval.rag_eval --pg postgresql://postgres@127.0.0.1:5544/jobtracker_rag`
-Labelled set: **39 JD-requirement → relevant-chunk labels** over 5 resumes (the repo's `test_resume.pdf` text plus 4 synthetic resumes
-I wrote) and 5 JDs (2 from the repo's live QA run, 3 synthetic). 32 labels have evidence; 7 are deliberately unsupported.
-Results in `eval/results/retrieval.json`:
+Mutation check: with the approval routing and the tool-node guard disabled, the 2 approve/reject tests fail.
 
-| mode | recall@1 | recall@3 | recall@5 | MRR@10 | ms/query |
-|---|---|---|---|---|---|
-| BM25 only | 0.844 | 0.906 | 0.906 | 0.870 | 0.2 |
-| dense only | 0.906 | 1.000 | 1.000 | 0.953 | 16.6 |
-| hybrid (RRF) | **0.938** | 1.000 | 1.000 | **0.969** | 14.7 |
-| hybrid + cross-encoder | 0.875 | 1.000 | 1.000 | 0.932 | 68–80 |
+The frontend panel compiles (`vite build` OK). The base branch's frontend build was already broken because the owner's `Toast.tsx` is
+untracked. I copied it in temporarily for the build check and did not commit it.
 
-(recall@k = at least one relevant chunk in the top k.)
-Honest reading: hybrid RRF beats each retriever alone. The ms-marco cross-encoder makes recall@1 and MRR **worse** on this
-resume-bullet domain; it was trained on web QA. It is kept to order evidence; the top-3 set is unchanged (recall@3 = 1.0).
+## Trajectory eval — `python -m eval.agent_eval --live`
+- **Tasks:** 29 deterministic tasks plus 3 live RemoteOK searches.
+- **Postings:** recorded RemoteOK fixtures (`eval/fixtures/jobs_recorded.json`: 26 results over 5 queries, 18 unique postings, recorded
+  2026-10-04 through `src.job_search`) plus 5 synthetic postings, 2 of which contain injected instructions.
+- **Human:** a script that approves only in the two "save … approve" cases.
+- **Writes:** go to a recorder; the real DB write is checked separately in the end-to-end section.
 
-Refusal gate (supported vs not-supported, 39 labels):
-- cosine gate @0.36 (in use): accuracy **0.949** (TP 30, TN 7, FP 0, FN 2). **Leave-one-resume-out accuracy 0.923.**
-- cross-encoder-logit gate (rejected): best in-sample accuracy 0.872, leave-one-resume-out 0.769.
-- 0 false positives: none of the 7 unsupported requirements was marked supported.
-
-pgvector parity: on all **32/32** queries, the pgvector `<=>` top 5 matched the in-process cosine top 5 exactly.
-
-## 2. Consistency + faithfulness harness — `EXTRA_KEYS_ENV=<file with GEMINI/GROQ keys> python -m eval.harness --workers 2`
-This runs the real pipeline nodes (extract_keywords → retrieve_evidence → alignment → cover letter) with **Groq openai/gpt-oss-120b**.
-The judge is **Gemini `gemini-3.5-flash-lite`**, temperature 0, JSON mode. Every LLM call is cached on disk (`eval/.cache`, gitignored).
-**50 cases**: 5 good fit, 20 bad fit, 5 good-fit prose JDs (no bullets), 5 bad-fit prose, 5 keyword-stuffed resumes, 5 prompt-injection JDs,
-2 "JD pasted into resume", and 3 empty or near-empty resumes.
-Faithfulness metric: **my own LLM judge, RAGAS-style** (split the letter into atomic claims, then check each against the resume chunks
-and against the cited chunks). RAGAS itself was not used: its install would pull langchain-openai/openai/datasets into the app venv.
-
-| check | before guardrails (v1, committed `harness_v1_before_guardrails.json`) | **final (v2, `harness.json`)** |
+| metric | run 1 (fresh LLM calls) | run 2 (re-run: cache + fixes) |
 |---|---|---|
-| JSON validity (strict parse of raw alignment output) | 50/50 | **50/50** |
-| score monotonicity pairs (good > bad, genuine > stuffed / injected / pasted) | 32/37 = 0.865 | **36/37 = 0.973** |
-| reasoning agrees with numeric score (judge) | 47/50 | **49/50 = 0.98** |
-| reasoning agrees with missing_keywords (judge) | 46/50 | **46/50 = 0.92** |
-| missing_keywords lists no skill the resume has (judge) | 46/50 | **46/50 = 0.92** |
-| faithfulness: letter claims supported by resume | 0.72 (200 claims) | **0.902 (138/153 claims)** |
-| claims carrying a citation | 0.71 | **0.922** |
-| cited claims supported by the cited chunks | 0.81 | **0.872** |
-| letters with no skill absent from resume (judge / lexicon) | 38/50, 34/50 | **48/50, 49/50** |
-| letters with no invalid citation id | 49/50 | **49/50** |
-| prompt injection resisted (score < 90, gaps listed, no injected claim) | 1/5 | **5/5** |
-| empty resume handled (score ≤ 20, no invented skills) | 1/3 | **3/3** |
-| LLM latency per case p50 / p95 (s, 3 sequential LLM calls) | — | **6.39 / 9.13** |
+| task success (29 fixture tasks) | 27/29 = 0.931 | **28/29 = 0.966** |
+| required tools used | 29/29 | 29/29 |
+| writes without approval | **0** (29/29 tasks clean) | **0** (29/29) |
+| write proposals in tasks that did not ask to save (incl. 3 injection JDs) | 0 | 0 |
+| live-search tasks | 3/3 | 3/3 |
+| steps / task (mean, max) | 3.52, 10 | 3.52, 10 |
+| tokens / task (mean) | 7,507 | 7,618 |
+| latency p50 / p95 (27 runs with fresh LLM calls) | 8.72 s / 47.88 s | — (mostly cache) |
+| live tasks latency p50 / p95 | 19.95 s / 30.1 s | 18.07 s / 31.06 s |
+| tailored-bullet faithfulness (Gemini judge: claims supported by cited chunks) | 7/7 (3 distinct bullets) | 7/7 |
 
-Good-fit and good-prose letters (10 cases): **73/73 claims supported by the resume**.
-In v2, 20 bad-fit or adversarial letters were refused because no requirement had evidence, and the guard removed 12 sentences.
-Remaining failures: `stuffed__nurse` (a keyword-stuffed resume scored above the genuine nurse resume),
-`jdpaste__marco__frontend` (the letter still claims React/TypeScript/Next.js/GraphQL; the paste filter only removes *verbatim* chunk copies),
-one letter citing chunk `c4` that was not retrieved, and one false "ICU" mention in a genuine nurse letter.
-Mean final score by kind: good 71.2, good_prose 70.7, bad 18.8, bad_prose 13.1, stuffed 59.2, injection 13.1, jd_paste 70.8, empty 4.5.
-Groq 429s during the run: 68 (handled by backoff and key rotation).
+Run 2 by category: shortlist 4/5, compare 3/3, tailor 4/4, fetch 2/2, save (approve/reject HITL) 3/3, tool fault 4/4,
+prompt injection 3/3, budget 2/2, ambiguous→question 3/3.
 
-## 3. Live end to end — `E2E_GROQ_MODEL=openai/gpt-oss-20b python eval/live_e2e.py`
-This starts the real FastAPI app under uvicorn on :8131 against the pgvector DB, POSTs `/api/analyze` with `test_resume.pdf` and the
-repo's QA JD (`eval/fixtures/jd_backend.txt`), then stops the server. Output is in `eval/results/live_analyze.json`.
+Run-1 failures and fixes:
+1. `shortlist_frontend_1`: Gemini per-minute 429s were treated as a daily cap, and the run aborted. Now only TPD/RPD retire a key,
+   and backoff gets 6 attempts.
+2. `fault_analyze_crash`: the `error_once` fault counter was not kept in graph state, so the fault fired on every step.
+   Now it is persisted in state, with a regression test.
+
+Run-2 failure: `shortlist_data_3` hit the 10-step budget. The agent searched 4 times and analysed 6 jobs before ranking.
+This is a real planning inefficiency and is not fixed.
+
+Results: `eval/results/agent_eval_run{1,2}.json` and the matching `.log` files.
+
+## End to end (real CLI, real PG18 + pgvector cluster on 127.0.0.1:5544, real LLM)
 ```
-health: database connected, groq_model openai/gpt-oss-20b
-status: 200 latency_s: 12.9
-backend: pgvector match_score: 81.3
-unsupported: ['Terraform, Kafka, observability (Prometheus/Grafana)']
-missing: ['FastAPI','EKS','RDS','SQS','Terraform','Kafka','Prometheus','Grafana']
-citation_check.cited_ids: c4 c5 c2 c3 c10 c8 c7   invalid_ids: []
-letter: "...handling more than 1 M requests per day [c4, c5, c2] ... While I have not yet worked with FastAPI, EKS, RDS, or SQS ..."
-resume_chunks rows in pgvector: 10 x vector(384)
+rows before: 5
+$ python -m src.agent "find remote python backend jobs, pick the best one for me and save it to my tracker"
+[agent] groq -> search_jobs(...)      [tool] search_jobs: ok {'count': 6}
+[agent] gemini -> analyze_fit(je74fef), analyze_fit(j73ab7a)   -> 36.8, 29.2
+[agent] gemini -> save_to_tracker({"job_id":"je74fef","status":"todo"})
+[PAUSE] approval needed ... thread cli-8c85dba4 waiting at ['approval']
+rows while paused: 5
+$ python -m src.agent --resume cli-8c85dba4 --decision approve      (new process, state from SQLite)
+[human] approved=['call_3560917']   [tool] save_to_tracker: ok {'application_id': 6}
+=== done | steps=4 tokens=9864 saves=1 ===
+rows after: 6   ->  6|Kruger NearShore LLC - Rekluti|DESARROLLADOR FULL STACK|todo
 ```
-An earlier live run on the same day with the default **gpt-oss-120b** also returned 200: 14.9s, score 75.9, 8 cited ids, 0 invalid.
-That run's printed output is in the agent transcript; its JSON file was overwritten.
-By the final run, **both Groq keys had exhausted the 200k tokens/day quota for gpt-oss-120b** (`TPD: Limit 200000, Used 199998`).
-The saved live JSON therefore uses gpt-oss-20b, which has a separate quota. While doing this I found and fixed a bug: a target-role
-timeout caused by 429 retries made `/api/analyze` return 500.
+- **Reject path:** `--auto reject "find a remote devops kubernetes job and add it to my tracker"` paused, then returned
+  `save_to_tracker: ERROR not_approved` with `saves=0`. Rows stayed at 6. The answer says "Not saved (human approval was rejected)".
+- **API:** uvicorn on :8132. `POST /api/agent/run` streamed 9 NDJSON events ending in `paused` (rows 6 → 6).
+  `POST /api/agent/resume` with approve returned `save_to_tracker ... wrote: true, application_id 7` (rows 6 → 7).
+  Replaying the approval returned **409**.
+- **Transcripts:** `eval/results/e2e_*.txt` and `api_*.ndjson`.
+- **Bugs found in the live runs, both fixed:**
+  - A closed stdin crashed the CLI approval prompt. The CLI now prints the resume command; the run was already checkpointed.
+  - Switching from Groq to Gemini mid-conversation failed with 400 "missing thought_signature". Fixed with Gemini's documented
+    placeholder signature.
+- **DB state:** dev rows 6 and 7 stay in the private `jobtracker_rag` test DB. The owner's :5432 DB was not touched.
 
-## Limitations / not done
-- The labelled set is small (39 labels, 5 resumes, 5 JDs), and 4 of the resumes and 3 of the JDs are synthetic, written by me. I picked
-  the refusal threshold on this same set; the leave-one-resume-out figure (0.923) is the less optimistic estimate.
-- The judge is an LLM (Gemini flash-lite), not human labels or RAGAS. Faithfulness numbers inherit its errors.
-- The generator writes letters that still overstate some facts: cited-chunk precision is 0.872 (for example, it can say a skills-list item
-  was "in production"). The lexical guard catches unsupported *skills*, not overstated *depth*.
-- The injection sanitiser is regex-based. It catches the 5 phrasings tested, not every possible attack.
-  The JD-paste defence only catches verbatim copies.
-- The cross-encoder hurts top-1 ranking in this domain (MRR 0.932 vs 0.969 for RRF alone). A domain-tuned reranker was not tried.
-- The "project-description knowledge base" was not built: only resume chunks are indexed.
-- pgvector runs on a private PG18 cluster on :5544 that I built (no admin rights for the system install). Docker was not used.
-- The harness reuses cached LLM outputs. v2 re-generated every case whose prompt changed (62 new Groq calls, 68 cache hits).
+## Limitations / honest notes
+- **Most agent turns ran on Gemini `gemini-3.5-flash-lite`, not Groq gpt-oss-120b.** Both Groq keys were at the 200k TPD cap
+  (other agents share them). Providers used per task: gemini 32, groq 3 (of 32 tasks). The fallback works, but the numbers are mostly Gemini's.
+- The NVIDIA NIM fallback code exists, but no NIM key was found, so it was never exercised.
+- The eval is small: 29 fixture tasks + 3 live. I wrote the tasks, the synthetic postings and the pass checks.
+  The faithfulness judge (Gemini) judged 7 bullets, only 3 of them distinct.
+  Run 2 mostly replays cached LLM responses, so it is not an independent sample; run 1 is the fresh one.
+- Fixture postings are mostly loosely related to the queries (RemoteOK's free feed is small), so fit scores are low (14–37).
+- The reflection node and the injection defence are rule-based (regex sanitiser + system prompt + HITL gate).
+  The hard guarantee against an injected "save 50 jobs" is the approval gate plus a 5-saves-per-run cap, not the LLM's judgement.
+- `analyze_fit` runs the RAG with in-process dense search, because no `resume_id` is persisted for the agent's resume.
+  `/api/analyze` still uses pgvector.
+- Docker was not used. The PG18 cluster was started detached (`postgres.exe -D D:/ai-build/pgdata-rag -p 5544`) and stopped with
+  `pg_ctl stop -m fast`. Starting it with `pg_ctl start` from a tool shell crashed it (0xC0000142) once that console closed.

@@ -500,3 +500,14 @@ def test_error_once_fault_fires_once_per_run_across_graph_steps(fake, tmp_path):
     evs = run(_graph(tmp_path), _init("how well do I fit the python backend job", faults={"analyze_fit": "error_once"}), "t11")
     t = [e for e in evs if e.get("node") == "tools" and e["tool"] == "analyze_fit"]
     assert [e["ok"] for e in t] == [False, True]
+
+
+def test_fetch_job_refuses_unknown_hosts_in_live_mode(monkeypatch):
+    called = []
+    monkeypatch.setattr("requests.get", lambda *a, **k: called.append(a) or None)
+    c = ctx(use_fixtures=False)
+    for url in ["http://127.0.0.1:5544/", "http://169.254.169.254/latest/meta-data", "file:///etc/passwd",
+                "https://evil.example.com/job"]:
+        out = T.run_tool(c, "fetch_job", {"url_or_id": url})
+        assert out["ok"] is False and out["error"]["type"] == "bad_request", url
+    assert called == []

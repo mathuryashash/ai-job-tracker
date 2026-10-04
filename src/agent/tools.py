@@ -32,6 +32,8 @@ VALID_STATUSES = ["todo", "applied", "interviewing", "offer", "rejected"]
 WRITE_TOOLS = {"save_to_tracker"}
 MAX_SAVES_PER_RUN = 5
 CIRCUIT_BREAK_AFTER = 2
+# fetch_job only fetches arbitrary URLs on these job boards (no SSRF via URLs planted in a JD).
+FETCH_ALLOWED_HOSTS = {"remoteok.com", "remoteok.io", "usajobs.gov"}
 DESC_PREVIEW = 160
 DESC_FETCH = 1500
 
@@ -158,9 +160,15 @@ def fetch_job(ctx: ToolContext, url_or_id: str) -> dict:
     if job is None:
         if not key.startswith("http") or ctx.use_fixtures:
             raise ToolInputError(f"unknown job '{url_or_id}'. Use a job_id returned by search_jobs.")
+        from urllib.parse import urlparse
+        u = urlparse(key)
+        host = (u.hostname or "").lower()
+        if u.scheme != "https" or not any(host == h or host.endswith("." + h) for h in FETCH_ALLOWED_HOSTS):
+            raise ToolInputError(f"refusing to fetch '{key[:80]}': only https URLs on {sorted(FETCH_ALLOWED_HOSTS)} "
+                                 "or job_ids from search_jobs are allowed.")
         import requests
         try:
-            r = requests.get(key, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+            r = requests.get(key, timeout=20, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=False)
             r.raise_for_status()
         except requests.RequestException as e:
             raise ToolTransientError(f"fetch failed: {type(e).__name__}")

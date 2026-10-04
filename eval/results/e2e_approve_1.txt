@@ -1,0 +1,19 @@
+thread_id: cli-8c85dba4
+[agent] groq -> search_jobs({"limit":6,"query":"python backend","remote":true})
+[tool ] search_jobs: ok attempts=1 {'count': 6}
+[agent] gemini -> analyze_fit({"job_id":"je74fef"}), analyze_fit({"job_id":"j73ab7a"})
+[tool ] analyze_fit: ok attempts=1 {'score': 36.8}
+[tool ] analyze_fit: ok attempts=1 {'score': 29.2}
+[agent] gemini -> save_to_tracker({"job_id":"je74fef","status":"todo"})
+[PAUSE] approval needed: save_to_tracker {'job_id': 'je74fef', 'status': 'todo'} -> DESARROLLADOR FULL STACK @ Kruger NearShore LLC - Rekluti
+[PAUSE] thread cli-8c85dba4 waiting at ['approval']
+Approve this write? [y/N] Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "D:\ai-build\jobtracker-agent\src\agent\__main__.py", line 91, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "D:\ai-build\jobtracker-agent\src\agent\__main__.py", line 82, in main
+    ans = "approve" if input("Approve this write? [y/N] ").strip().lower().startswith("y") else "reject"
+                       ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+EOFError: EOF when reading a line

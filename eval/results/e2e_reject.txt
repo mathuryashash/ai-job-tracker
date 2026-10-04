@@ -1,0 +1,23 @@
+thread_id: cli-d37824a7
+[agent] gemini -> search_jobs({"remote":true,"query":"devops kubernetes"})
+[tool ] search_jobs: ok attempts=1 {'count': 6}
+[agent] gemini -> analyze_fit({"job_id":"j0bad7d"}), analyze_fit({"job_id":"j99e1bd"})
+[tool ] analyze_fit: ok attempts=1 {'score': 14.0}
+[tool ] analyze_fit: ok attempts=1 {'score': 31.1}
+[agent] gemini -> save_to_tracker({"status":"todo","job_id":"j99e1bd"})
+[PAUSE] approval needed: save_to_tracker {'status': 'todo', 'job_id': 'j99e1bd'} -> Software Engineer @ Mirantis
+[PAUSE] thread cli-d37824a7 waiting at ['approval']
+[human] decision: reject
+[human] approved=[] rejected=['call_2320036']
+[tool ] save_to_tracker: ERROR not_approved attempts=1 
+[agent] gemini -> final answer
+[check] accept 
+
+=== done | steps=4 tokens=8294 saves=0 ===
+I found a remote DevOps / Kubernetes-related job, analyzed your fit, and attempted to add it to your tracker, but the tracker save was rejected by the reviewer.
+
+- **Job ID:** `j99e1bd`
+- **Title:** Software Engineer
+- **Company:** Mirantis
+- **Fit Score:** 31.1%
+- **Tracker Status:** Not saved (human approval was rejected)
