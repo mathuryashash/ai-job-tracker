@@ -72,6 +72,8 @@ class AgentState(TypedDict, total=False):
     tokens: int
     reflections: int
     saves_done: int
+    tool_failures: Annotated[Dict[str, int], _merge]
+    fault_counts: Annotated[Dict[str, int], _merge]
     status: str
     final: str
     # run options (not shown to the LLM)
@@ -113,7 +115,8 @@ def _ctx(state: AgentState, llm: Optional[ChatClient]) -> T.ToolContext:
         resume_text=state.get("resume_text") or "", jobs=dict(state.get("jobs") or {}),
         analyses=dict(state.get("analyses") or {}), use_fixtures=state.get("use_fixtures", True),
         extra_jobs=list(state.get("extra_jobs") or []), faults=dict(state.get("faults") or {}),
-        approved_ids=list(state.get("approved_ids") or []), saves_done=state.get("saves_done", 0), llm=llm)
+        approved_ids=list(state.get("approved_ids") or []), saves_done=state.get("saves_done", 0), llm=llm,
+        failures=dict(state.get("tool_failures") or {}), fault_counts=dict(state.get("fault_counts") or {}))
 
 
 # ── nodes ───────────────────────────────────────────────────────────────────
@@ -204,6 +207,7 @@ def tools_node(state: AgentState) -> dict:
                          "content": json.dumps(result, ensure_ascii=False)[:6000]})
     upd: Dict[str, Any] = {"messages": out_msgs, "trajectory": events, "jobs": ctx.new_jobs,
                            "analyses": ctx.new_analyses, "saves_done": ctx.saves_done,
+                           "tool_failures": ctx.failures, "fault_counts": ctx.fault_counts,
                            "tokens": state.get("tokens", 0) + ctx.usage_tokens}
     if ctx.usage_tokens:
         events[-1]["tool_tokens"] = ctx.usage_tokens
@@ -232,7 +236,8 @@ def reflect_node(state: AgentState) -> dict:
     bad_ids = sorted({m for m in re.findall(r"\bj[0-9a-f]{6}\b", text) if m not in known})
     if bad_ids:
         issues.append(f"Your answer mentions job ids that no tool returned: {bad_ids}. Use only real ids.")
-    if re.search(r"shortlist|best \d|top \d|compare|rank", task) and "analyze_fit" not in used_tools:
+    have_jobs = bool(state.get("jobs"))
+    if have_jobs and re.search(r"shortlist|best \d|top \d|compare|rank", task) and "analyze_fit" not in used_tools:
         issues.append("The task asks to rank/compare jobs but you never called analyze_fit. Call it before answering.")
     m = re.search(r"\b(?:best|top)\s+(\d+)", task)
     if m and "analyze_fit" in used_tools:
@@ -241,7 +246,7 @@ def reflect_node(state: AgentState) -> dict:
         if have < want:
             issues.append(f"The user asked for the best {want} but you analysed only {have} job(s). "
                           f"Call analyze_fit on more candidates before ranking.")
-    if re.search(r"tailor|bullet", task) and "tailor_bullets" not in used_tools:
+    if have_jobs and re.search(r"tailor|bullet", task) and "tailor_bullets" not in used_tools:
         issues.append("The task asks for tailored bullets but you never called tailor_bullets.")
     n = state.get("reflections", 0)
     if issues and n < MAX_REFLECTIONS and state.get("steps", 0) < state.get("max_steps", DEFAULT_MAX_STEPS):
@@ -290,7 +295,7 @@ def initial_state(task: str, resume_text: Optional[str] = None, max_steps: int =
                   extra_jobs: Optional[list] = None) -> AgentState:
     return {"task": task, "messages": [{"role": "user", "content": task}], "jobs": {}, "analyses": {},
             "trajectory": [], "approved_ids": [], "rejected_ids": [], "steps": 0, "max_steps": max_steps,
-            "tokens": 0, "reflections": 0, "saves_done": 0, "status": "running", "final": "",
+            "tokens": 0, "reflections": 0, "saves_done": 0, "tool_failures": {}, "fault_counts": {}, "status": "running", "final": "",
             "use_fixtures": use_fixtures, "faults": faults or {}, "extra_jobs": extra_jobs or [],
             "resume_text": resume_text if resume_text is not None else default_resume_text()}
 

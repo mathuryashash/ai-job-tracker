@@ -5,6 +5,7 @@ import ResumeAnalyzer from './components/ResumeAnalyzer';
 import JobSearch from './components/JobSearch';
 import KanbanBoard from './components/KanbanBoard';
 import Settings from './components/Settings';
+import AgentPanel from './components/AgentPanel';
 import { api } from './api/client';
 
 export default function App() {
@@ -45,6 +46,7 @@ export default function App() {
         {view === 'analyzer' && <ResumeAnalyzer />}
         {view === 'jobs' && <JobSearch onSaveJob={handleSaveJob} />}
         {view === 'kanban' && <KanbanBoard refreshTick={refreshTick} />}
+        {view === 'agent' && <AgentPanel onSaved={handleSaveJob} />}
         {view === 'settings' && <Settings />}
       </main>
     </div>

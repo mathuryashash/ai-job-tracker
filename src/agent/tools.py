@@ -31,6 +31,7 @@ FIXTURES = os.path.join(ROOT, "eval", "fixtures", "jobs_recorded.json")
 VALID_STATUSES = ["todo", "applied", "interviewing", "offer", "rejected"]
 WRITE_TOOLS = {"save_to_tracker"}
 MAX_SAVES_PER_RUN = 5
+CIRCUIT_BREAK_AFTER = 2
 DESC_PREVIEW = 160
 DESC_FETCH = 1500
 
@@ -62,6 +63,7 @@ class ToolContext:
     new_analyses: Dict[str, dict] = field(default_factory=dict)
     retry_sleep: float = 0.5
     usage_tokens: int = 0
+    failures: Dict[str, int] = field(default_factory=dict)       # tool -> exhausted-retry count this run
 
 
 def job_id_for(job: dict) -> str:
@@ -358,6 +360,9 @@ def run_tool(ctx: ToolContext, name: str, raw_args: Any, call_id: str = "",
     except (ValidationError, json.JSONDecodeError, TypeError) as e:
         return _err("invalid_arguments", str(e), False)
     ctx.current_call_id = call_id
+    if ctx.failures.get(name, 0) >= CIRCUIT_BREAK_AFTER:
+        return _err("circuit_open", f"{name} failed {ctx.failures[name]} times in this run; not calling it again. "
+                    "Tell the user it is unavailable or use another tool.", False)
     attempts = 0
     while True:
         attempts += 1
@@ -369,8 +374,8 @@ def run_tool(ctx: ToolContext, name: str, raw_args: Any, call_id: str = "",
             return out
         except ToolTransientError as e:
             if attempts >= max_attempts:
-                r = _err("transient_failure", f"{e} (after {attempts} attempts)", True)
-                return r
+                ctx.failures[name] = ctx.failures.get(name, 0) + 1
+                return _err("transient_failure", f"{e} (after {attempts} attempts)", True)
             time.sleep(ctx.retry_sleep * (2 ** (attempts - 1)))
         except ToolInputError as e:
             return _err("bad_request", str(e), False)

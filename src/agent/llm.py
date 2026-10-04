@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -38,6 +39,10 @@ NIM_MODEL = os.getenv("AGENT_NIM_MODEL", "openai/gpt-oss-120b")
 
 class LLMUnavailable(RuntimeError):
     """Every provider in the chain failed."""
+
+
+# Only a *daily* cap retires a key for the run; per-minute 429s (incl. Gemini RESOURCE_EXHAUSTED) back off.
+_DAILY_CAP = re.compile(r"per ?day|\bTPD\b|\bRPD\b|PerDay", re.I)
 
 
 def _read_env_file(path: str) -> Dict[str, str]:
@@ -106,7 +111,7 @@ def _for_provider(messages: List[Dict[str, Any]], prov: str) -> List[Dict[str, A
 
 class ChatClient:
     def __init__(self, keys: Optional[Dict[str, List[str]]] = None, cache_dir: str = CACHE_DIR,
-                 use_cache: bool = True, max_retries: int = 4, base_delay: float = 2.0,
+                 use_cache: bool = True, max_retries: int = 6, base_delay: float = 2.0,
                  providers: Optional[List[str]] = None, timeout: int = 90):
         self.keys = keys if keys is not None else load_keys()
         self.cache_dir = cache_dir
@@ -176,7 +181,7 @@ class ChatClient:
                     return res
                 text = r.text[:300].replace(key, "***")
                 errors.append(f"{prov}#{idx}: HTTP {r.status_code}")
-                if r.status_code == 429 and ("tokens per day" in text or "TPD" in text or "quota" in text.lower()):
+                if r.status_code == 429 and _DAILY_CAP.search(text):
                     self._exhausted.add((prov, idx))     # daily cap: skip this key for the rest of the run
                     break
                 if r.status_code in (429, 500, 502, 503, 504):
@@ -186,7 +191,7 @@ class ChatClient:
                 if r.status_code == 400 and attempt == 0 and "tool" in text.lower():
                     continue
                 break   # other 4xx: try the next provider
-        raise LLMUnavailable("; ".join(errors[-6:]) or "no LLM provider configured")
+        raise LLMUnavailable("; ".join(errors[-6:]) or "all provider keys hit their daily cap or none configured")
 
     def _sleep(self, attempt: int, retry_after: Optional[str] = None):
         with self._lock:

@@ -450,3 +450,53 @@ def test_api_validates_input(tmp_path, monkeypatch):
     assert client.post("/api/agent/resume", json={"thread_id": "x", "decision": "maybe"}).status_code == 422
     assert client.post("/api/agent/run", json={"task": "find jobs", "faults": {"search_jobs": "rm -rf"}}).status_code == 400
     api.set_graph(None)
+
+
+def test_llm_per_minute_quota_429_is_retried_not_marked_exhausted(monkeypatch, tmp_path):
+    n = {"i": 0}
+
+    def post(url, headers=None, json=None, timeout=None):
+        n["i"] += 1
+        if n["i"] == 1:
+            return _Resp(429, text='{"error": {"message": "Resource has been exhausted (e.g. check quota).", '
+                                   '"status": "RESOURCE_EXHAUSTED"}}')
+        return _Resp(200, {"choices": [{"message": {"role": "assistant", "content": "ok"}}], "usage": {}})
+    monkeypatch.setattr(L.requests, "post", post)
+    monkeypatch.setattr(L.time, "sleep", lambda s: None)
+    c = L.ChatClient(keys={"groq": [], "gemini": ["m1"], "nim": []}, cache_dir=str(tmp_path))
+    assert c.chat([{"role": "user", "content": "q"}]).provider == "gemini" and not c._exhausted
+
+
+def test_circuit_breaker_stops_hammering_a_down_tool():
+    c = ctx(faults={"search_jobs": "down"})
+    c.failures = {}
+    first = T.run_tool(c, "search_jobs", {"query": "python"})
+    second = T.run_tool(c, "search_jobs", {"query": "python"})
+    assert first["error"]["type"] == "transient_failure" and second["error"]["type"] == "transient_failure"
+    third = T.run_tool(c, "search_jobs", {"query": "python dev"})
+    assert third["error"]["type"] == "circuit_open" and third["error"]["retryable"] is False
+    assert c.fault_counts["search_jobs"] == 6          # third call never reached the backend
+
+
+def test_reflection_does_not_demand_analysis_when_search_failed(fake, tmp_path):
+    fake([lambda m: {"content": "", "tool_calls": [call("search_jobs", {"query": "python"}, "c1")]},
+          lambda m: {"content": "Search is unavailable, so I could not shortlist jobs."}])
+    evs = run(_graph(tmp_path), _init("shortlist the best 3 python jobs", faults={"search_jobs": "down"}), "t10")
+    r = [e for e in evs if e.get("node") == "reflect"]
+    assert len(r) == 1 and r[0]["verdict"] == "accept"
+
+
+def test_error_once_fault_fires_once_per_run_across_graph_steps(fake, tmp_path):
+    def retry_analyze(m):
+        r = tool_results(m, "analyze_fit")
+        assert r[-1]["ok"] is False
+        return {"content": "", "tool_calls": [call("analyze_fit", {"job_id": first_job_id(m)}, "a2")]}
+    fake([
+        lambda m: {"content": "", "tool_calls": [call("search_jobs", {"query": "python backend"}, "c1")]},
+        lambda m: {"content": "", "tool_calls": [call("analyze_fit", {"job_id": first_job_id(m)}, "a1")]},
+        retry_analyze,
+        lambda m: {"content": "Fit analysed after one retry."},
+    ])
+    evs = run(_graph(tmp_path), _init("how well do I fit the python backend job", faults={"analyze_fit": "error_once"}), "t11")
+    t = [e for e in evs if e.get("node") == "tools" and e["tool"] == "analyze_fit"]
+    assert [e["ok"] for e in t] == [False, True]

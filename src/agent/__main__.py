@@ -79,7 +79,11 @@ def main(argv=None) -> int:
         elif a.resume and a.decision:
             return 0   # one decision per --resume invocation
         elif sys.stdin.isatty():
-            ans = "approve" if input("Approve this write? [y/N] ").strip().lower().startswith("y") else "reject"
+            try:
+                ans = "approve" if input("Approve this write? [y/N] ").strip().lower().startswith("y") else "reject"
+            except EOFError:
+                print(f"\nNo answer. Resume with: python -m src.agent --resume {thread} --decision approve|reject")
+                return 0
         else:
             print(f"Resume with: python -m src.agent --resume {thread} --decision approve|reject")
             return 0

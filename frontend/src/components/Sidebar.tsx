@@ -4,6 +4,7 @@ export default function Sidebar({ active, setActive, health }) {
     { id: 'analyzer',   icon: '📄', label: 'Resume Analyzer' },
     { id: 'jobs',       icon: '🔍', label: 'Job Search'    },
     { id: 'kanban',     icon: '📋', label: 'Job Tracker'   },
+    { id: 'agent',      icon: '🤖', label: 'Job Agent'     },
     { id: 'settings',   icon: '⚙️', label: 'Settings'      },
   ];
 
