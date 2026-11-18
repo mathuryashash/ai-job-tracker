@@ -3,10 +3,10 @@ import { api, saveJobsToDB } from '../api/client';
 import { useToast } from './Toast';
 
 const PLATFORM_META = {
-  linkedin:  { label: 'LinkedIn',  icon: '💼', color: '#0a66c2' },
-  indeed:    { label: 'Indeed',    icon: '🔵', color: '#2164f3' },
-  glassdoor: { label: 'Glassdoor', icon: '🟢', color: '#0caa41' },
-  tinyfish:  { label: 'Tinyfish', icon: '🐟', color: '#6366f1' },
+  linkedin:  { label: 'LinkedIn',  color: '#0a66c2' },
+  indeed:    { label: 'Indeed',    color: '#2164f3' },
+  glassdoor: { label: 'Glassdoor', color: '#0caa41' },
+  tinyfish:  { label: 'Tinyfish', color: '#6366f1' },
 };
 
 export default function JobSearch({ onSaveJob }) {
@@ -88,7 +88,7 @@ export default function JobSearch({ onSaveJob }) {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="page-title">🔍 Automated Job Search</div>
+        <div className="page-title">Job Search</div>
         <div className="page-subtitle">Free sources: RemoteOK, USAJOBS + LinkedIn/Indeed/Glassdoor via Apify when configured</div>
       </div>
 
@@ -105,7 +105,7 @@ export default function JobSearch({ onSaveJob }) {
             />
             {localStorage.getItem('target_role') && query === localStorage.getItem('target_role') && (
               <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span className="badge badge-blue">🎯 Auto-filled from resume analysis</span>
+                <span className="badge badge-blue">From resume analysis</span>
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => { setQuery(''); localStorage.removeItem('target_role'); }}
@@ -132,7 +132,7 @@ export default function JobSearch({ onSaveJob }) {
           <label style={{ display: 'block', marginBottom: 10 }}>Platforms</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {(available.length ? available : Object.keys(PLATFORM_META).map(id => ({ id, enabled: false }))).map(p => {
-              const meta = PLATFORM_META[p.id] || { label: p.id, icon: '🌐' };
+              const meta = PLATFORM_META[p.id] || { label: p.id };
               return (
                 <button
                   key={p.id}
@@ -140,7 +140,7 @@ export default function JobSearch({ onSaveJob }) {
                   onClick={() => p.enabled && togglePlatform(p.id)}
                   title={!p.enabled ? `Configure API key in Settings to enable ${meta.label}` : meta.label}
                 >
-                  {meta.icon} {meta.label}
+                  {meta.label}
                   {!p.enabled && <span className="badge badge-yellow" style={{ marginLeft: 4, padding: '1px 6px', fontSize: '0.65rem' }}>Setup needed</span>}
                 </button>
               );
@@ -148,7 +148,7 @@ export default function JobSearch({ onSaveJob }) {
           </div>
         </div>
 
-        {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>⚠️ {error}</div>}
+        {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>! {error}</div>}
 
         <button
           className="btn btn-primary btn-lg"
@@ -156,7 +156,7 @@ export default function JobSearch({ onSaveJob }) {
           disabled={loading}
           style={{ minWidth: 160 }}
         >
-          {loading ? <><div className="spinner" /> Searching…</> : '🔍 Search Jobs'}
+          {loading ? <><div className="spinner" /> Searching…</> : 'Search jobs'}
         </button>
       </div>
 

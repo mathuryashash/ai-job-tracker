@@ -134,20 +134,20 @@ export default function ResumeAnalyzer({ setView }: { setView?: (v: string) => v
       )}
 
       <div className="page-header">
-        <div className="page-title">📄 Resume Analyzer</div>
+        <div className="page-title">Resume Analyzer</div>
         <div className="page-subtitle">Upload your resume and paste a JD to get ATS alignment score and a tailored cover letter</div>
       </div>
 
       {apiKeyMissing && (
         <div className="alert alert-warning" style={{ marginBottom: 16 }}>
-          ⚠️ <strong>Groq API key not configured.</strong>
+          ⚠ <strong>Groq API key not configured.</strong>
           <button onClick={() => setView?.('settings')} style={{ color: '#f59e0b', textDecoration: 'underline', marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', font: 'inherit' }}>
             Set it in Settings →
           </button>
         </div>
       )}
 
-      {error && <div className="alert alert-error">⚠️ {error}</div>}
+      {error && <div className="alert alert-error">! {error}</div>}
 
       <div className="grid-2">
         {/* Left — inputs */}
@@ -170,10 +170,10 @@ export default function ResumeAnalyzer({ setView }: { setView?: (v: string) => v
               style={{ display: 'none' }}
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
-            <div className="drop-zone-icon">📎</div>
+            <div className="drop-zone-icon">↑</div>
             {file ? (
               <div className="drop-zone-file">
-                <span className="drop-zone-filename">✅ {file.name}</span>
+                <span className="drop-zone-filename">{file.name}</span>
               </div>
             ) : initialForm.fileName ? (
               <div className="drop-zone-file">

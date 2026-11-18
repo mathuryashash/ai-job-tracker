@@ -61,7 +61,7 @@ export default function ScoreGauge({ score }) {
       </svg>
 
       <div className="text-xs text-muted" style={{ textAlign: 'center', marginTop: 4 }}>
-        {score >= 70 ? '✅ Strong match — apply with confidence' : score >= 45 ? '⚠️ Moderate match — tailor your resume' : '❌ Low match — significant gaps detected'}
+        {score >= 70 ? 'Strong match — apply with confidence' : score >= 45 ? 'Moderate match — tailor your resume' : 'Low match — significant gaps detected'}
       </div>
     </div>
   );

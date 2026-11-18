@@ -49,36 +49,36 @@ export default function Dashboard({ setView }: { setView: (v: string) => void })
     <div className="page">
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div className="page-title">⚡ Dashboard</div>
-          <div className="page-subtitle">Your job search at a glance</div>
+          <div className="page-title">Dashboard</div>
+          <div className="page-subtitle">Job search overview</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={() => setView('analyzer')}>📄 New Analysis</button>
-          <button className="btn btn-secondary" onClick={() => setView('jobs')}>🔍 Search Jobs</button>
-          <button className="btn btn-secondary" onClick={handleBatchAnalyze}>⚡ Analyze All Saved Jobs</button>
+          <button className="btn btn-primary" onClick={() => setView('analyzer')}>New analysis</button>
+          <button className="btn btn-secondary" onClick={() => setView('jobs')}>Search jobs</button>
+          <button className="btn btn-secondary" onClick={handleBatchAnalyze}>Analyze saved jobs</button>
         </div>
       </div>
 
       <div className="grid-4 mb-24">
-        <div className="card" style={{ borderTop: '3px solid #6366f1' }}>
-          <div className="card-title">Total Applications</div>
+        <div className="card" style={{ borderTop: '2px solid #6366f1' }}>
+          <div className="card-title">Total</div>
           <div className="stat-value">{stats.total}</div>
-          <div className="stat-label">across all stages</div>
+          <div className="stat-label">all stages</div>
         </div>
-        <div className="card" style={{ borderTop: '3px solid #f59e0b' }}>
+        <div className="card" style={{ borderTop: '2px solid var(--yellow)' }}>
           <div className="card-title">Interviewing</div>
-          <div className="stat-value" style={{ color: '#f59e0b' }}>{stats.interviewing}</div>
-          <div className="stat-label">active conversations</div>
+          <div className="stat-value">{stats.interviewing}</div>
+          <div className="stat-label">active</div>
         </div>
-        <div className="card" style={{ borderTop: '3px solid #10b981' }}>
+        <div className="card" style={{ borderTop: '2px solid var(--green)' }}>
           <div className="card-title">Offers</div>
-          <div className="stat-value" style={{ color: '#10b981' }}>{stats.offer}</div>
-          <div className="stat-label">received so far</div>
+          <div className="stat-value">{stats.offer}</div>
+          <div className="stat-label">received</div>
         </div>
-        <div className="card" style={{ borderTop: '3px solid #3b82f6' }}>
+        <div className="card" style={{ borderTop: '2px solid var(--blue)' }}>
           <div className="card-title">Applied</div>
-          <div className="stat-value" style={{ color: '#3b82f6' }}>{stats.applied}</div>
-          <div className="stat-label">awaiting response</div>
+          <div className="stat-value">{stats.applied}</div>
+          <div className="stat-label">awaiting reply</div>
         </div>
       </div>
 
@@ -104,7 +104,7 @@ export default function Dashboard({ setView }: { setView: (v: string) => void })
                   background: item.color,
                   borderRadius: 99,
                   transition: 'width 0.8s ease',
-                  boxShadow: `0 0 8px ${item.color}55`,
+                  boxShadow: 'none',
                 }} />
               </div>
             </div>
@@ -117,10 +117,10 @@ export default function Dashboard({ setView }: { setView: (v: string) => void })
         <div className="card">
           <div className="section-title">Recent Applications</div>
           {recentApps.length === 0 ? (
-            <div className="empty-state" style={{ padding: '30px 0' }}>
-              <div className="empty-state-icon">📭</div>
-              <div className="empty-state-text">No applications yet</div>
-            </div>
+              <div className="empty-state" style={{ padding: '28px 0' }}>
+                <div className="empty-state-icon" style={{ fontSize: '1.25rem' }}>—</div>
+                <div className="empty-state-text">No applications yet</div>
+              </div>
           ) : (
             recentApps.map((app) => (
               <div key={app.id} className="activity-item">

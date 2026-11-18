@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
 
 const STAGES = [
-  { id: 'todo',         label: 'To Do',        icon: '📝', color: '#6366f1' },
-  { id: 'applied',      label: 'Applied',       icon: '📤', color: '#3b82f6' },
-  { id: 'interviewing', label: 'Interviewing',   icon: '📞', color: '#f59e0b' },
-  { id: 'offer',        label: 'Offer',          icon: '🎉', color: '#10b981' },
-  { id: 'rejected',     label: 'Rejected',       icon: '❌', color: '#ef4444' },
+  { id: 'todo',         label: 'To Do',        color: '#6366f1' },
+  { id: 'applied',      label: 'Applied',       color: '#3b82f6' },
+  { id: 'interviewing', label: 'Interviewing',   color: '#f59e0b' },
+  { id: 'offer',        label: 'Offer',          color: '#4cc38a' },
+  { id: 'rejected',     label: 'Rejected',       color: '#e5484d' },
 ];
 
 function AddCard({ onAdd }) {
@@ -31,7 +31,7 @@ function AddCard({ onAdd }) {
     <div className="mb-24">
       {!open ? (
         <button className="btn btn-secondary" onClick={() => setOpen(true)}>
-          ➕ Add Application
+          + Add application
         </button>
       ) : (
         <div className="card">
@@ -58,7 +58,7 @@ function AddCard({ onAdd }) {
           </div>
           <div className="flex gap-8">
             <button className="btn btn-primary" onClick={submit} disabled={loading || !company || !position}>
-              {loading ? <div className="spinner" /> : '✅ Save Application'}
+              {loading ? <div className="spinner" /> : 'Save application'}
             </button>
             <button className="btn btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
           </div>
@@ -112,8 +112,8 @@ export default function KanbanBoard({ refreshTick }) {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="page-title">📋 Job Tracker</div>
-        <div className="page-subtitle">Drag & drop cards across stages to track your application pipeline</div>
+        <div className="page-title">Job Tracker</div>
+        <div className="page-subtitle">Drag cards to update application stage</div>
       </div>
 
       <AddCard onAdd={load} />
@@ -133,13 +133,13 @@ export default function KanbanBoard({ refreshTick }) {
                 className="kanban-col-header"
                 style={{ borderBottomColor: stage.color, color: stage.color }}
               >
-                <span className="kanban-col-title">{stage.icon} {stage.label}</span>
+                <span className="kanban-col-title">{stage.label}</span>
                 <span className="kanban-count">{stageApps.length}</span>
               </div>
 
               {stageApps.length === 0 && (
                 <div className="empty-state" style={{ padding: '40px 8px' }}>
-                  <div style={{ fontSize: '1.4rem', opacity: 0.3 }}>📭</div>
+                  <div style={{ fontSize: '1rem', opacity: 0.3 }}>—</div>
                 </div>
               )}
 
@@ -171,7 +171,7 @@ export default function KanbanBoard({ refreshTick }) {
                     >
                       {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                     </select>
-                    <button className="btn btn-danger btn-sm" onClick={() => deleteCard(app.id)}>🗑</button>
+                    <button className="btn btn-danger btn-sm" onClick={() => deleteCard(app.id)}>Delete</button>
                   </div>
                   {expandedId === app.id && (
                     <div style={{ padding: '12px', borderTop: '1px solid #eee', fontSize: '13px' }}>

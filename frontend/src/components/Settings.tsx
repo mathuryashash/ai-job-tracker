@@ -63,19 +63,19 @@ export default function Settings() {
   return (
     <div className="page">
       <div className="page-header">
-        <div className="page-title">⚙️ Settings</div>
-        <div className="page-subtitle">Configure LLM models and automated search API credentials</div>
+        <div className="page-title">Settings</div>
+        <div className="page-subtitle">Configure models and API credentials</div>
       </div>
 
       {message.text && (
         <div className={`alert alert-${message.type}`}>
-          {message.type === 'success' ? '✅' : '⚠️'} {message.text}
+          {message.type === 'success' ? '✓' : '!'} {message.text}
         </div>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
         <div className="settings-section">
-          <h3>🧠 LLM Inference Engine</h3>
+          <h3>LLM inference</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="form-group">
               <label>Groq API Key</label>
@@ -101,7 +101,7 @@ export default function Settings() {
         </div>
 
         <div className="settings-section">
-          <h3>🕵️‍♂️ Automated Job Scrapers</h3>
+          <h3>Job scrapers</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="form-group">
               <label>Apify API Token</label>
@@ -136,7 +136,7 @@ export default function Settings() {
           disabled={loading}
           style={{ alignSelf: 'flex-start', minWidth: 160 }}
         >
-          {loading ? 'Saving...' : '💾 Save Settings'}
+          {loading ? 'Saving…' : 'Save settings'}
         </button>
       </div>
     </div>
