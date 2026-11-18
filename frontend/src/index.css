@@ -80,6 +80,68 @@ body {
   margin: 0 auto;
 }
 
+/* ── Mobile top bar (hidden on desktop) ─────────────────────────────────── */
+.mobile-topbar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 52px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 110;
+  flex-shrink: 0;
+}
+
+.mobile-topbar-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.mobile-menu-btn {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.mobile-menu-btn:active { background: var(--surface); }
+
+/* Overlay backdrop for mobile sidebar */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 105;
+}
+
+.sidebar-backdrop.open { display: block; }
+
+@media (max-width: 767px) {
+  .mobile-topbar { display: flex; }
+
+  .main-content { margin-left: 0; }
+
+  .page { padding: 20px 16px; }
+
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+    z-index: 110;
+  }
+
+  .sidebar.open { transform: translateX(0); }
+}
+
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 .sidebar {
   position: fixed;
@@ -222,6 +284,13 @@ body {
 .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+
+@media (max-width: 767px) {
+  .grid-4 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+  .grid-5 { grid-template-columns: 1fr 1fr; }
+}
 
 /* ── Buttons ─────────────────────────────────────────────────────────────── */
 .btn {
@@ -370,7 +439,21 @@ select option { background: var(--bg-2); }
 .keywords-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
 /* ── Kanban ──────────────────────────────────────────────────────────────── */
-.kanban-board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .kanban-board {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+}
 
 .kanban-col {
   background: var(--surface);
@@ -632,8 +715,11 @@ select option { background: var(--bg-2); }
 
 /* ── Reduced motion ─────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    transition-duration: 0.001ms !important;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.001ms;
   }
 }

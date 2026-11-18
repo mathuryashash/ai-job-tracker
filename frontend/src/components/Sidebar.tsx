@@ -1,4 +1,4 @@
-export default function Sidebar({ active, setActive, health }) {
+export default function Sidebar({ active, setActive, health, isOpen = false }) {
   const nav = [
     { id: 'dashboard',  icon: iconDashboard,  label: 'Dashboard'       },
     { id: 'analyzer',   icon: iconAnalyzer,   label: 'Resume Analyzer' },
@@ -9,7 +9,7 @@ export default function Sidebar({ active, setActive, health }) {
   ];
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${isOpen ? ' open' : ''}`}>
       <div className="sidebar-logo">
         <div className="sidebar-logo-text">AI Job Tracker</div>
         <div className="sidebar-logo-sub">Groq · LangGraph · RAG</div>
