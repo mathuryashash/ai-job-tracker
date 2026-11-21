@@ -60,6 +60,13 @@ export default function App() {
     setSidebarOpen(false);
   };
 
+  // Close sidebar on Escape key (accessibility)
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && sidebarOpen) setSidebarOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [sidebarOpen]);
+
   const handleSaveJob = () => {
     setRefreshTick(prev => prev + 1);
   };

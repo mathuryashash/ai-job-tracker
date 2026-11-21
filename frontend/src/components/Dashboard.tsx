@@ -47,12 +47,12 @@ export default function Dashboard({ setView }: { setView: (v: string) => void })
 
   return (
     <div className="page">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header">
         <div>
           <div className="page-title">Dashboard</div>
           <div className="page-subtitle">Job search overview</div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="page-header-actions">
           <button className="btn btn-primary" onClick={() => setView('analyzer')}>New analysis</button>
           <button className="btn btn-secondary" onClick={() => setView('jobs')}>Search jobs</button>
           <button className="btn btn-secondary" onClick={handleBatchAnalyze}>Analyze saved jobs</button>
