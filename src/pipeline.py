@@ -315,7 +315,7 @@ def _extract_company_and_role(jd: str) -> tuple[str, str]:
         return "Analyzed Target", "Matched Role"
     company = ""
     role = ""
-    lines = [l.strip() for l in jd.splitlines() if l.strip()]
+    lines = [line.strip() for line in jd.splitlines() if line.strip()]
     head = lines[:15]
     for line in head:
         lo = line.lower()

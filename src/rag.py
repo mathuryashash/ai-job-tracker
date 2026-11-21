@@ -120,16 +120,16 @@ _META_RE = re.compile(r"^(company|location|salary|employer|organization|title|ro
 
 
 def extract_requirements(jd: str, limit: int = MAX_REQUIREMENTS) -> List[str]:
-    lines = [l for l in (jd or "").splitlines() if l.strip()]
+    lines = [line for line in (jd or "").splitlines() if line.strip()]
     reqs = []
-    for l in lines:
-        if _BULLET_RE.match(l):
-            r = _BULLET_RE.sub("", l).strip()
+    for line in lines:
+        if _BULLET_RE.match(line):
+            r = _BULLET_RE.sub("", line).strip()
             r = re.sub(r"^(nice to have|bonus|preferred|plus)\s*:\s*", "", r, flags=re.I)
             if len(r.split()) >= 2:
                 reqs.append(r)
     if not reqs:  # unstructured JD: fall back to sentences
-        body = " ".join(l.strip() for l in lines if not _META_RE.match(l.strip()))
+        body = " ".join(line.strip() for line in lines if not _META_RE.match(line.strip()))
         for s in re.split(r"(?<=[.!?;])\s+", body):
             s = s.strip()
             if len(s.split()) >= 4:
