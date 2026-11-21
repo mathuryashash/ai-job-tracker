@@ -300,13 +300,13 @@ with tab_kanban:
                         key=f"move_{app['id']}"
                     )
                     if new_stage != app["status"]:
-                        requests.put(f"{BACKEND_URL}/api/applications/{app['id']}", json={"status": new_stage})
+                        requests.put(f"{BACKEND_URL}/api/applications/{app['id']}", json={"status": new_stage}, timeout=5)
                         st.rerun()
                 with sub_col2:
                     st.write("")  # Alignment
                     st.write("")
                     if st.button("🗑️", key=f"del_{app['id']}"):
-                        requests.delete(f"{BACKEND_URL}/api/applications/{app['id']}")
+                        requests.delete(f"{BACKEND_URL}/api/applications/{app['id']}", timeout=5)
                         st.rerun()
 
 # --- TAB 3: CONFIGURATION ---

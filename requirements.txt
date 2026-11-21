@@ -5,6 +5,7 @@ streamlit
 pydantic
 pydantic-settings
 langgraph
+langgraph-checkpoint-sqlite
 langchain
 langchain-core
 langchain-groq

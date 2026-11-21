@@ -20,7 +20,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -70,7 +70,7 @@ class ToolContext:
 
 def job_id_for(job: dict) -> str:
     key = (job.get("url") or "") or f"{job.get('title')}|{job.get('company')}"
-    return "j" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:6]
+    return "j" + hashlib.sha1(key.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]
 
 
 def _job_summary(jid: str, j: dict) -> dict:
