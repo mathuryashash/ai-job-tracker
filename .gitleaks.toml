@@ -1,19 +1,21 @@
-[toml]
-version = "v8"
+# gitleaks v8 config: default rules plus the skips this repo intended.
+title = "ai-job-tracker"
 
-[allowlist]
-  description = "Allowlist for known false positives"
-  file = ".gitleaksignore"
+[extend]
+useDefault = true
 
-# Gitleaks ignore patterns for known false positives
-[[rules]]
-  id = "package-lock-json"
-  description = "Skip package-lock.json files"
-  ignore = true
-  files = ["""package-lock\.json"""]
+[[allowlists]]
+description = "Lockfiles, vendored dependencies and build output"
+paths = [
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)node_modules/''',
+  '''(^|/)(dist|build|coverage)/''',
+]
 
-[[rules]]
-  id = "node-modules"
-  description = "Skip node_modules directories"
-  ignore = true
-  files = ["""node_modules/"""]
+[[allowlists]]
+description = "Obvious test placeholders in docs and tests (e.g. gsk_test123), never real keys"
+regexTarget = "secret"
+regexes = [
+  '''(?i)^[a-z]+_test[a-z0-9_]*$''',
+  '''(?i)your_?[a-z_]*token[a-z_]*''',
+]
