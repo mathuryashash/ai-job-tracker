@@ -16,3 +16,5 @@ pgvector
 pypdf
 plotly
 requests
+cryptography
+rank-bm25
