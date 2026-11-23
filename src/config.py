@@ -8,12 +8,6 @@ import os
 from typing import List
 
 
-def _split_csv(value: str, default: List[str]) -> List[str]:
-    if not value:
-        return default
-    return [v.strip() for v in value.split(",") if v.strip()]
-
-
 # ── LLM ──────────────────────────────────────────────────────────────────────
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 # Default model — must exist on Groq and support tool-free JSON output.
@@ -30,7 +24,8 @@ BACKEND_PORT: int = int(os.getenv("BACKEND_PORT", "8000"))
 
 # CORS: explicit allowlist. "*" disables credentials and is rejected in prod.
 _raw_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
-CORS_ORIGINS: List[str] = _split_csv(_raw_origins, ["http://localhost:5173"])
+CORS_ORIGINS: List[str] = ([v.strip() for v in _raw_origins.split(",") if v.strip()]
+                           if _raw_origins else ["http://localhost:5173"])
 CORS_ALLOW_CREDENTIALS: bool = "*" not in CORS_ORIGINS
 
 # ── Uploads ──────────────────────────────────────────────────────────────────

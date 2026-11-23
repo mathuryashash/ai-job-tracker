@@ -293,13 +293,11 @@ _CITE_RE = re.compile(r"\[(c\d+(?:\s*,\s*c\d+)*)\]")
 
 
 def extract_citations(text: str) -> List[str]:
-    ids = []
+    seen: Dict[str, None] = {}
     for m in _CITE_RE.finditer(text or ""):
         for cid in m.group(1).split(","):
-            cid = cid.strip()
-            if cid not in ids:
-                ids.append(cid)
-    return ids
+            seen[cid.strip()] = None
+    return list(seen)
 
 
 def invalid_citations(text: str, allowed_ids) -> List[str]:

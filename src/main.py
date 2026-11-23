@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.requests import Request
 from pydantic import BaseModel
 
-from . import config, db, job_search as job_search_module, pipeline
+from . import config, crypto, db, job_search as job_search_module, pipeline
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -123,14 +123,10 @@ async def health_check():
         "version": app.version,
         "database": db_status,
         "groq_model": pipeline.current_model(),
-        "encryption_enabled": _encryption_enabled(),
+        "encryption_enabled": crypto.is_enabled(),
         "keys_configured": {"groq": groq, "apify": apify, "tinyfish": tinyfish},
     }
 
-
-def _encryption_enabled() -> bool:
-    from . import crypto
-    return crypto.is_enabled()
 
 
 # ── Models ───────────────────────────────────────────────────────────────────

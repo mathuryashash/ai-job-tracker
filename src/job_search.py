@@ -257,13 +257,9 @@ def clean_description(raw: Optional[str], max_chars: int = 2000) -> str:
 
 def _salary_range(mn, mx, prefix: str = "") -> str:
     # Providers (RemoteOK) send 0 for "not disclosed" — rendered as "$0 - $0".
-    def _present(v):
-        return v not in (None, "") and str(v).strip() not in ("0", "0.0")
-    mn_s = f"{prefix}{mn}" if _present(mn) else ""
-    mx_s = f"{prefix}{mx}" if _present(mx) else ""
-    if mn_s or mx_s:
-        return f"{mn_s} - {mx_s}".strip(" -")
-    return ""
+    def _ok(v): return v not in (None, "") and str(v).strip() not in ("0", "0.0")
+    mn_s, mx_s = (f"{prefix}{mn}" if _ok(mn) else ""), (f"{prefix}{mx}" if _ok(mx) else "")
+    return f"{mn_s} - {mx_s}".strip(" -") if mn_s or mx_s else ""
 
 
 # ── Orchestrator ─────────────────────────────────────────────────────────────

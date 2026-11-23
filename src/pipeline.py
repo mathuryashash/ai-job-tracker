@@ -28,19 +28,12 @@ from pydantic import BaseModel, Field
 from . import db
 
 logger = logging.getLogger(__name__)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
 
 # Lazy imports for heavy ML deps (avoid Triton/CUDA hang on Windows)
 _ChatGroq = None
 _ChatPromptTemplate = None
 _JsonOutputParser = None
 _SentenceTransformer = None
-_StateGraph = None
-_END = None
 
 
 def _get_chat_groq():
@@ -73,22 +66,6 @@ def _get_sentence_transformer():
         from sentence_transformers import SentenceTransformer
         _SentenceTransformer = SentenceTransformer
     return _SentenceTransformer
-
-
-def _get_state_graph():
-    global _StateGraph
-    if _StateGraph is None:
-        from langgraph.graph import StateGraph
-        _StateGraph = StateGraph
-    return _StateGraph
-
-
-def _get_end():
-    global _END
-    if _END is None:
-        from langgraph.graph import END
-        _END = END
-    return _END
 
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -709,8 +686,7 @@ def parallel_outputs_node(state: PipelineState) -> PipelineState:
 
 @lru_cache(maxsize=1)
 def _build_pipeline_cached():
-    StateGraph = _get_state_graph()
-    END = _get_end()
+    from langgraph.graph import END, StateGraph
     wf = StateGraph(PipelineState)
     wf.add_node("load_resume", load_resume_node)
     wf.add_node("extract_keywords", extract_keywords_node)
@@ -729,8 +705,7 @@ def _build_pipeline_cached():
 @lru_cache(maxsize=1)
 def _build_batch_pipeline_cached():
     """Pipeline variant for batch mode (skips PDF loading — resume already in DB)."""
-    StateGraph = _get_state_graph()
-    END = _get_end()
+    from langgraph.graph import END, StateGraph
     wf = StateGraph(PipelineState)
     wf.add_node("extract_keywords", extract_keywords_node)
     wf.add_node("retrieve_evidence", retrieve_evidence_node)

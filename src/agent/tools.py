@@ -114,10 +114,9 @@ class SaveToTrackerArgs(BaseModel):
 # ── tools ───────────────────────────────────────────────────────────────────
 
 def _fixture_pool(ctx: ToolContext) -> List[dict]:
-    data = json.load(open(FIXTURES, encoding="utf-8"))
-    pool: List[dict] = []
-    for jobs in data["queries"].values():
-        pool.extend(jobs)
+    with open(FIXTURES, encoding="utf-8") as fh:
+        data = json.load(fh)
+    pool: List[dict] = [j for jobs in data["queries"].values() for j in jobs]
     return pool + list(ctx.extra_jobs)
 
 
