@@ -85,9 +85,6 @@ class AgentState(TypedDict, total=False):
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
-def _client() -> ChatClient:
-    return get_client()
-
 
 def _clean_assistant(msg: dict) -> dict:
     out = {"role": "assistant", "content": msg.get("content") or ""}
@@ -132,7 +129,7 @@ def agent_node(state: AgentState) -> dict:
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}] + list(state.get("messages") or [])
     t0 = time.time()
     try:
-        res = _client().chat(msgs, tools=T.openai_tool_schemas(), cache_tag="agent")
+        res = get_client().chat(msgs, tools=T.openai_tool_schemas(), cache_tag="agent")
     except LLMUnavailable as e:
         text = f"LLM unavailable on every provider: {e}"
         return {"status": "error", "final": text, "messages": [{"role": "assistant", "content": text}],
@@ -187,7 +184,7 @@ def approval_node(state: AgentState) -> dict:
 
 def tools_node(state: AgentState) -> dict:
     """Custom ToolNode: runs every pending call; failures come back as structured errors."""
-    ctx = _ctx(state, _client())
+    ctx = _ctx(state, get_client())
     rejected = set(state.get("rejected_ids") or [])
     out_msgs, events = [], []
     for c in _pending_calls(state):
