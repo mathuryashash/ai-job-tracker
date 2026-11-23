@@ -134,12 +134,7 @@ def extract_requirements(jd: str, limit: int = MAX_REQUIREMENTS) -> List[str]:
             s = s.strip()
             if len(s.split()) >= 4:
                 reqs.append(s)
-    seen, out = set(), []
-    for r in reqs:
-        k = r.lower()
-        if k not in seen:
-            seen.add(k)
-            out.append(r[:300])
+    out = list(dict.fromkeys(r[:300] for r in reqs))
     return out[:limit]
 
 
@@ -293,13 +288,11 @@ _CITE_RE = re.compile(r"\[(c\d+(?:\s*,\s*c\d+)*)\]")
 
 
 def extract_citations(text: str) -> List[str]:
-    ids = []
+    seen: Dict[str, None] = {}
     for m in _CITE_RE.finditer(text or ""):
         for cid in m.group(1).split(","):
-            cid = cid.strip()
-            if cid not in ids:
-                ids.append(cid)
-    return ids
+            seen[cid.strip()] = None
+    return list(seen)
 
 
 def invalid_citations(text: str, allowed_ids) -> List[str]:
