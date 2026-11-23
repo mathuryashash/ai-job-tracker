@@ -134,7 +134,12 @@ def extract_requirements(jd: str, limit: int = MAX_REQUIREMENTS) -> List[str]:
             s = s.strip()
             if len(s.split()) >= 4:
                 reqs.append(s)
-    out = list(dict.fromkeys(r[:300] for r in reqs))
+    seen, out = set(), []
+    for r in reqs:
+        k = r.lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(r[:300])
     return out[:limit]
 
 
