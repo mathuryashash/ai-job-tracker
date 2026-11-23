@@ -324,7 +324,7 @@ def delete_job_application(app_id: int) -> None:
 def save_config(key: str, value: str) -> None:
     """Save a config value. Secrets (groq_api_key, apify_token, tinyfish_api_key)
     are encrypted at rest when FERNET_KEY is set."""
-    stored = crypto.encrypt(value) if _is_secret(key) else value
+    stored = crypto.encrypt(value) if key in _SECRET_KEYS else value
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -346,16 +346,12 @@ def get_config(key: str) -> Optional[str]:
             if not row:
                 return None
             value = row[0]
-            if _is_secret(key):
+            if key in _SECRET_KEYS:
                 return crypto.decrypt(value)
             return value
 
 
 _SECRET_KEYS = frozenset({"groq_api_key", "apify_token", "tinyfish_api_key"})
-
-
-def _is_secret(key: str) -> bool:
-    return key in _SECRET_KEYS
 
 
 # ── Saved jobs ───────────────────────────────────────────────────────────────
