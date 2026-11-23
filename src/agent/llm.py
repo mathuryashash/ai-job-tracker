@@ -46,14 +46,11 @@ _DAILY_CAP = re.compile(r"per ?day|\bTPD\b|\bRPD\b|PerDay", re.I)
 
 
 def _read_env_file(path: str) -> Dict[str, str]:
-    d: Dict[str, str] = {}
-    if path and os.path.exists(path):
-        for line in open(path, encoding="utf-8"):
-            line = line.strip()
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                d[k.strip()] = v.strip().strip('"').strip("'")
-    return d
+    if not (path and os.path.exists(path)):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        pairs = (l.strip().split("=", 1) for l in fh if "=" in l and not l.lstrip().startswith("#"))
+        return {k.strip(): v.strip().strip('"').strip("'") for k, v in pairs}
 
 
 def load_keys() -> Dict[str, List[str]]:
@@ -141,7 +138,8 @@ class ChatClient:
         ck = _cache_key(tag, messages, tools, temperature)
         path = os.path.join(self.cache_dir, ck + ".json")
         if self.use_cache and os.path.exists(path):
-            d = json.load(open(path, encoding="utf-8"))
+            with open(path, encoding="utf-8") as fh:
+                d = json.load(fh)
             with self._lock:
                 self.stats["cache_hits"] += 1
             return LLMResult(d["message"], d["provider"], d["model"], d.get("usage", {}), True, 0.0)
@@ -176,8 +174,9 @@ class ChatClient:
                     with self._lock:
                         self.stats["calls"] += 1
                     if self.use_cache:
-                        json.dump({"message": msg, "provider": prov, "model": model, "usage": res.usage},
-                                  open(path, "w", encoding="utf-8"), ensure_ascii=False)
+                        with open(path, "w", encoding="utf-8") as fh:
+                            json.dump({"message": msg, "provider": prov, "model": model, "usage": res.usage},
+                                      fh, ensure_ascii=False)
                     return res
                 text = r.text[:300].replace(key, "***")
                 errors.append(f"{prov}#{idx}: HTTP {r.status_code}")
